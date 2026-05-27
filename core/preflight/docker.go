@@ -1,6 +1,8 @@
 package preflight
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,55 +11,252 @@ import (
 	"time"
 )
 
+const dockerVersionTimeout = 30 * time.Second
+
 func EnsureDockerRunning() error {
-	// 0. NEW: Check if Docker is even installed!
-	_, err := exec.LookPath("docker")
-	if err != nil {
-		return fmt.Errorf("Docker is missing! \033[33m👉 Please download and install Docker Desktop from: https://www.docker.com/products/docker-desktop\033[0m")
+
+	fmt.Println("🔍 Validating Docker daemon...")
+
+	// ------------------------------------------------------------
+	// 1. Check if Docker is installed
+	// ------------------------------------------------------------
+
+	if _, err := exec.LookPath("docker"); err != nil {
+
+		fmt.Println("⚠️ Docker not installed — attempting installation...")
+
+		switch runtime.GOOS {
+
+		case "darwin":
+
+			// Validate Homebrew
+			if _, err := exec.LookPath("brew"); err != nil {
+
+				return errors.New(
+					"Homebrew is required.\n" +
+						"Install from: https://brew.sh",
+				)
+			}
+
+			cmd := exec.Command(
+				"brew",
+				"install",
+				"--cask",
+				"docker",
+			)
+
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+
+			if err := cmd.Run(); err != nil {
+
+				return fmt.Errorf(
+					"docker installation failed: %w",
+					err,
+				)
+			}
+
+			fmt.Println("✅ Docker Desktop installed successfully")
+
+		case "linux":
+
+			cmd := exec.Command(
+				"sh",
+				"-c",
+				"curl -fsSL https://get.docker.com | sh",
+			)
+
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+
+			if err := cmd.Run(); err != nil {
+
+				return fmt.Errorf(
+					"docker installation failed: %w",
+					err,
+				)
+			}
+
+			fmt.Println("✅ Docker installed successfully")
+
+		case "windows":
+
+			return errors.New(
+				"automatic Docker installation on Windows is not yet supported safely.\n" +
+					"Please install Docker Desktop manually from:\n" +
+					"https://www.docker.com/products/docker-desktop",
+			)
+
+		default:
+
+			return errors.New("unsupported operating system")
+		}
 	}
 
-	// 1. Check if Docker daemon responds
-	err = exec.Command("docker", "info").Run()
+	// ------------------------------------------------------------
+	// 2. Validate Docker daemon
+	// ------------------------------------------------------------
+
+	version, err := runDockerVersion()
+
 	if err == nil {
-		return nil // It's already running!
+
+		fmt.Println("✅ Docker daemon healthy")
+		fmt.Println("🐳 Docker Engine v" + version)
+
+		return nil
 	}
 
-	fmt.Println("\033[33m⚠️ Docker is not running. Attempting auto-start...\033[0m")
+	fmt.Println("⚠️ Docker daemon unreachable — attempting recovery...")
+
+	// ------------------------------------------------------------
+	// 3. OS-specific daemon recovery
+	// ------------------------------------------------------------
 
 	switch runtime.GOOS {
-	case "darwin": // Mac
-		exec.Command("open", "-a", "Docker").Run()
-	case "windows": // Native Windows Command Prompt
-		exec.Command("powershell", "-Command", "Start-Process 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe'").Run()
+
+	case "darwin":
+
+		fmt.Println("🚀 Launching Docker Desktop...")
+
+		if err := exec.Command(
+			"open",
+			"-a",
+			"Docker",
+		).Start(); err != nil {
+
+			return fmt.Errorf(
+				"failed to launch Docker Desktop: %w",
+				err,
+			)
+		}
+
+	case "windows":
+
+		fmt.Println("🚀 Launching Docker Desktop...")
+
+		if err := exec.Command(
+			"powershell",
+			"-Command",
+			"Start-Process Docker Desktop",
+		).Start(); err != nil {
+
+			return fmt.Errorf(
+				"failed to launch Docker Desktop: %w",
+				err,
+			)
+		}
+
 	case "linux":
-		// 2. Check if we are in WSL or Native Linux
+
 		if isWSL() {
-			// We are in WSL! Reach out to Windows and start Docker Desktop
-			exec.Command("cmd.exe", "/c", "start", "", "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe").Run()
+
+			fmt.Println("🪟 Detected WSL environment")
+
+			exec.Command(
+				"cmd.exe",
+				"/c",
+				"start",
+				"",
+				"C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
+			).Start()
+
 		} else {
-			// Native Linux (Ubuntu Server, etc.)
-			// We don't want to freeze the CLI with a sudo password prompt.
-			return fmt.Errorf("Docker daemon is down. Please run 'sudo systemctl start docker' manually")
+
+			return errors.New(
+				"docker daemon unavailable.\n\n" +
+					"Run:\n" +
+					"sudo systemctl start docker\n" +
+					"sudo usermod -aG docker $USER",
+			)
 		}
 	}
 
-	// 3. Poll until it wakes up (max 30 seconds)
-	for i := 0; i < 60; i++ {
-		if exec.Command("docker", "info").Run() == nil {
-			fmt.Println("\033[1;32m✅ Docker started successfully.\033[0m")
-			return nil
-		}
-		time.Sleep(1 * time.Second)
-	}
+	// ------------------------------------------------------------
+	// 4. Wait for Docker daemon readiness
+	// ------------------------------------------------------------
 
-	return fmt.Errorf("failed to start Docker automatically. Please start Docker Desktop manually")
+	timeout := time.After(180 * time.Second)
+
+	ticker := time.NewTicker(5 * time.Second)
+
+	defer ticker.Stop()
+
+	for {
+
+		select {
+
+		case <-timeout:
+
+			return errors.New(
+				"docker daemon startup timeout exceeded",
+			)
+
+		case <-ticker.C:
+
+			version, err := runDockerVersion()
+
+			if err == nil {
+
+				fmt.Println("✅ Docker daemon recovered")
+				fmt.Println("🐳 Docker Engine v" + version)
+
+				return nil
+			}
+
+			fmt.Println("⏳ Waiting for Docker daemon...")
+		}
+	}
 }
 
-// isWSL reads the Linux kernel version to see if Microsoft compiled it
+// ------------------------------------------------------------
+// Docker version validation
+// ------------------------------------------------------------
+
+func runDockerVersion() (string, error) {
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		dockerVersionTimeout,
+	)
+
+	defer cancel()
+
+	out, err := exec.CommandContext(
+		ctx,
+		"docker",
+		"version",
+		"--format",
+		"{{.Server.Version}}",
+	).Output()
+
+	if err != nil {
+		return "", err
+	}
+
+	version := strings.TrimSpace(string(out))
+
+	if version == "" {
+		return "unknown", nil
+	}
+
+	return version, nil
+}
+
+// ------------------------------------------------------------
+// WSL detection
+// ------------------------------------------------------------
+
 func isWSL() bool {
-	b, err := os.ReadFile("/proc/version")
+
+	data, err := os.ReadFile("/proc/version")
+
 	if err != nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(string(b)), "microsoft")
+
+	return strings.Contains(
+		strings.ToLower(string(data)),
+		"microsoft",
+	)
 }

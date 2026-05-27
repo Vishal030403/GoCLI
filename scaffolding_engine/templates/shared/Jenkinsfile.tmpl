@@ -1,82 +1,102 @@
 pipeline {
-
     agent any
-
+ 
     environment {
         APP_NAME = '{{ .app_name }}'
         REGISTRY = '127.0.0.1:5001'
+        PROJECT_DIR = "${HOST_PROJECT_PATH}"
     }
-
+ 
     stages {
-
+ 
         stage('🛠️ Build Docker Image') {
             steps {
                 echo "Building production image..."
+ 
                 sh """
-                docker build -t ${APP_NAME}:latest .
+                docker build -t ${APP_NAME}:latest ${PROJECT_DIR}
                 """
             }
         }
-
+ 
         stage('🧪 Run Unit Tests') {
             steps {
                 echo "Running unit tests..."
-                sh """
-                docker run --rm ${APP_NAME}:latest sh -c '{{ .test_command }} || true'
-                """
+ 
+                // 💡 Safe Template Injection: Dynamically spins up a Python OR Node container for testing based on CLI detection
+                sh '''
+                    docker run --rm \
+                   -v ${PROJECT_DIR}:/work \
+                    -w /work \
+                    {{ if .python_version }}python:{{ .python_version }}-slim{{ else }}node:{{ if .node_version }}{{ .node_version }}{{ else }}20{{ end }}-alpine{{ end }} \
+                    sh -c "{{ if .test_command }}{{ .test_command }}{{ else }}npm run test{{ end }} || true"
+                '''
             }
         }
-
+ 
         stage('🔒 Security Scan (Checkov)') {
             steps {
                 echo "Scanning Infrastructure as Code..."
+ 
                 sh """
-                docker run --rm -v ${WORKSPACE}:/work bridgecrew/checkov -d /work --skip-path k8s/overlays --quiet || true
+                docker run --rm -v ${PROJECT_DIR}:/work bridgecrew/checkov -d /work --skip-path k8s/overlays --quiet || true
                 """
             }
         }
-
+ 
         stage('📦 Tag & Push to Registry') {
             steps {
                 script {
-                    env.GIT_SHA = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                    if (env.GIT_SHA == "") {
-                        env.GIT_SHA = "latest"
-                    }
+ 
+                    // 💡 Fix 1: Trust injected Jenkins workspace (Pushless CI Fix)
+                    sh 'git config --global --add safe.directory "*"'
+ 
+                    // 💡 Fix 2: Fallback for local runs without a git history
+                    env.GIT_COMMIT = sh(
+                        script: 'git -C ${PROJECT_DIR} rev-parse --short HEAD || echo "local-dev"',
+                        returnStdout: true
+                    ).trim()
+ 
+                    echo "Tagging image with ${env.GIT_COMMIT}..."
+ 
+                    sh """
+                    docker tag ${APP_NAME}:latest localhost:5001/${APP_NAME}:${env.GIT_COMMIT}
+                    """
+ 
+                    sh """
+                    docker push localhost:5001/${APP_NAME}:${env.GIT_COMMIT}
+                    """
                 }
-
-                echo "Tagging image with SHA: ${env.GIT_SHA}"
-
-                sh """
-                docker tag ${APP_NAME}:latest ${REGISTRY}/${APP_NAME}:${env.GIT_SHA}
-                """
-
-                sh """
-                docker push ${REGISTRY}/${APP_NAME}:${env.GIT_SHA}
-                """
             }
         }
-
+ 
         stage('🚀 Deploy to Kubernetes') {
             steps {
                 echo "Updating Kustomize and Deploying to Production..."
+ 
                 script {
+ 
+                    // 💡 THE FIX:
+                    // Use 127.0.0.1 so Kind's containerd registry mirror patch intercepts the image pull correctly
                     sh """
-                    cd k8s/base && \
-                    kustomize edit set image 127.0.0.1:5001/${APP_NAME}:latest=${REGISTRY}/${APP_NAME}:${env.GIT_SHA}
+                    cd ${PROJECT_DIR}/k8s/base && \
+                    kustomize edit set image 127.0.0.1:5001/${APP_NAME}:latest=127.0.0.1:5001/${APP_NAME}:${env.GIT_COMMIT}
                     """
-
+ 
                     sh """
-                    kustomize build k8s/overlays/prod | docker run -i --rm -u root --network host \
+                    kustomize build ${PROJECT_DIR}/k8s/overlays/prod | docker run -i --rm -u root --network host \
                       -v ${env.HOST_HOME}/.kube:/root/.kube \
                       -e KUBECONFIG=/root/.kube/config \
-                      bitnami/kubectl --context kind-ephemeral-test --insecure-skip-tls-verify=true apply -f -
+                      bitnami/kubectl \
+                      --context kind-ephemeral-test \
+                      --insecure-skip-tls-verify=true \
+                      apply -f -
                     """
                 }
             }
         }
     }
-
+ 
     post {
         always {
             echo "Pipeline execution complete. Cleaning workspace..."

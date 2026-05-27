@@ -5,7 +5,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+
 	"pipeline-cli/core"
+	"pipeline-cli/core/config"
+	"pipeline-cli/core/policy"
+	"pipeline-cli/policies"
 	"pipeline-cli/scaffolding_engine/core/detector"
 
 	"github.com/spf13/cobra"
@@ -68,6 +72,24 @@ var validateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println("\033[1;36m🔎 Starting Local Validation (Shift-Left)...\033[0m")
 		lintCode(); lintDocker(); lintK8s(); securityScan(); unitTests(); lintPipeline()
+
+		// ── Policy Engine ─────────────────────────────────────────────────────
+		cwd, _ := os.Getwd()
+		cfg, cfgErr := config.LoadConfig(cwd)
+		policyFailed := false
+		if cfgErr != nil {
+			fmt.Printf("\033[1;31m❌ %s\033[0m\n", cfgErr.Error())
+			policyFailed = true
+		} else {
+			results := policy.RunPolicies(cwd, cfg, policies.All())
+			policyFailed = policy.PrintReport(results)
+		}
+
+		// Print the validate summary before deciding exit code
+		if policyFailed {
+			fmt.Println("\n\033[1;31m❌ Validation failed: one or more error-severity policies did not pass.\033[0m")
+			os.Exit(1)
+		}
 		fmt.Println("\n\033[1;32m✅ All local validations passed! Your code is safe and ready for CI deployment.\033[0m")
 	},
 }

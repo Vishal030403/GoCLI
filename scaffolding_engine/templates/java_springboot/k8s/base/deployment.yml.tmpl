@@ -29,6 +29,22 @@ spec:
           imagePullPolicy: Always
           ports:
             - containerPort: {{ .app_port }}
+{{- if .env_vars }}
+          env:
+{{- range .env_vars }}
+            - name: {{ .Name }}
+              value: "{{ .Value }}"
+{{- end }}
+{{- end }}
+{{- if .secrets }}
+{{- range .secrets }}
+            - name: {{ .Name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .SecretName }}
+                  key: {{ .SecretKey }}
+{{- end }}
+{{- end }}
             
           # 🛡️ Pillar 3: Security - Drop all Linux capabilities & lock filesystem
           securityContext:

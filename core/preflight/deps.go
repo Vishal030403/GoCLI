@@ -2,6 +2,7 @@ package preflight
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 )
@@ -29,8 +30,51 @@ func CheckDependencies() error {
 func installDependency(dep string) error {
 	// Docker requires system-level permissions and restarts, so we force the user to install it manually.
 	if dep == "docker" {
-		return fmt.Errorf("Docker Desktop must be installed manually from docker.com")
+
+	switch runtime.GOOS {
+
+	case "darwin":
+
+		// Validate Homebrew exists
+		if _, err := exec.LookPath("brew"); err != nil {
+
+			return fmt.Errorf(
+				"Homebrew is required.\nInstall from: https://brew.sh",
+			)
+		}
+
+		cmd := exec.Command(
+			"brew",
+			"install",
+			"--cask",
+			"docker",
+		)
+
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		return cmd.Run()
+
+	case "linux":
+
+		cmd := exec.Command(
+			"bash",
+			"-c",
+			"curl -fsSL https://get.docker.com | sh",
+		)
+
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		return cmd.Run()
+
+	case "windows":
+
+		return fmt.Errorf(
+			"automatic Docker installation on Windows is not yet supported safely",
+		)
 	}
+}
 
 	switch runtime.GOOS {
 	case "darwin": // Mac

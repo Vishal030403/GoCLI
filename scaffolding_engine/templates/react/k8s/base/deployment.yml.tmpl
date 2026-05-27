@@ -33,6 +33,21 @@ spec:
           ports:
             - containerPort: {{ .app_port }}
 
+{{- if or .env_vars .secrets }}
+          env:
+{{- range .env_vars }}
+            - name: {{ .Name }}
+              value: "{{ .Value }}"
+{{- end }}
+{{- range .secrets }}
+            - name: {{ .Name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .SecretName }}
+                  key: {{ .SecretKey }}
+{{- end }}
+{{- end }}
+
           # 🛡️ Pillar 3: Security - Drop all Linux capabilities & lock filesystem
           securityContext:
             allowPrivilegeEscalation: false
