@@ -1,8 +1,17 @@
 package ai
 
-// FailureContext holds structured diagnostic data for a failed pipeline stage.
-// Logs are trimmed before any AI call — never send full log dumps to Gemini.
-type FailureContext struct {
+// Confidence indicates how strongly the diagnosis is supported by verified evidence.
+type Confidence string
+
+const (
+	ConfidenceHigh   Confidence = "High"
+	ConfidenceMedium Confidence = "Medium"
+	ConfidenceLow    Confidence = "Low"
+)
+
+// DiagnosticContext holds structured diagnostic data for a failed pipeline stage.
+// Diagnosis must be driven by verified evidence in this struct, not raw log keywords alone.
+type DiagnosticContext struct {
 	Command       string
 	Stage         string
 	Error         string
@@ -11,12 +20,24 @@ type FailureContext struct {
 	SkippedStages []string
 	FailedStage   string // Jenkins-specific failed stage name, if detected
 	FinalStatus   string // e.g. FAILURE, ABORTED
+
+	// Verified environment state (populated by CollectEvidence)
+	PodStatus         string
+	PodRestarts       int
+	PodNamespace      string
+	PodName           string
+	ServiceStatus     string
+	ServiceExists     bool
+	ServiceNamespace  string
+	RegistryStatus    string
+	RegistryReachable bool
+	DockerDaemonOK    bool
+	JenkinsStatus     string
+	TunnelEstablished bool
+	PortForwardFailed bool
+
+	Evidence []string
 }
 
-// WarningItem represents a non-fatal policy or validation finding.
-type WarningItem struct {
-	PolicyName string
-	Category   string
-	Message    string
-	Findings   []string
-}
+// FailureContext is an alias for backward compatibility with existing call sites.
+type FailureContext = DiagnosticContext

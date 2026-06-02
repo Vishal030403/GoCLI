@@ -8,11 +8,18 @@ import (
 const maxRecentLogLines = 30
 
 var (
-	jenkinsStageRe   = regexp.MustCompile(`(?i)(?:Stage|stage)\s+['"]?([^'"\n]+)['"]?\s+(?:failed|Skipped due to earlier failure)`)
-	jenkinsSkippedRe = regexp.MustCompile(`(?i)Stage\s+['"]?([^'"\n]+)['"]?\s+Skipped due to earlier failure`)
-	jenkinsFailedRe  = regexp.MustCompile(`(?i)(?:ERROR:|FAILED|Failure|Build step '[^']+' marked build as failure)`)
-	k8sPodErrorRe    = regexp.MustCompile(`(?i)(ImagePullBackOff|CrashLoopBackOff|ErrImagePull|CreateContainerConfigError|Back-off restarting)`)
+	jenkinsStageRe      = regexp.MustCompile(`(?i)(?:Stage|stage)\s+['"]?([^'"\n]+)['"]?\s+(?:failed|Skipped due to earlier failure)`)
+	jenkinsSkippedRe    = regexp.MustCompile(`(?i)Stage\s+['"]?([^'"\n]+)['"]?\s+Skipped due to earlier failure`)
+	jenkinsFailedRe     = regexp.MustCompile(`(?i)(?:ERROR:|FAILED|Failure|Build step '[^']+' marked build as failure)`)
+	jenkinsResultRe     = regexp.MustCompile(`(?i)Finished:\s*(SUCCESS|FAILURE|ABORTED|UNSTABLE)`)
+	jenkinsDockerFailRe = regexp.MustCompile(`(?i)(?:docker build|failed to solve|executor failed running)`)
+	k8sPodErrorRe       = regexp.MustCompile(`(?i)(ImagePullBackOff|CrashLoopBackOff|ErrImagePull|CreateContainerConfigError|Back-off restarting)`)
 )
+
+// defaultJenkinsStageOrder is used to infer skipped downstream stages when logs omit explicit skip lines.
+var defaultJenkinsStageOrder = []string{
+	"Checkout", "Docker Build", "Unit Tests", "Security Scan", "Registry Push", "Deployment",
+}
 
 // ExtractRecentLogs returns the last N relevant log lines, prioritising error lines.
 func ExtractRecentLogs(raw string, limit int) []string {
@@ -56,14 +63,18 @@ func EnrichFromJenkinsLog(ctx *FailureContext, raw string) {
 		return
 	}
 
-	lower := strings.ToLower(raw)
-	switch {
-	case strings.Contains(lower, "failure"):
-		ctx.FinalStatus = "FAILURE"
-	case strings.Contains(lower, "aborted"):
-		ctx.FinalStatus = "ABORTED"
-	case strings.Contains(lower, "unstable"):
-		ctx.FinalStatus = "UNSTABLE"
+	if m := jenkinsResultRe.FindStringSubmatch(raw); len(m) > 1 {
+		ctx.FinalStatus = strings.ToUpper(m[1])
+	} else {
+		lower := strings.ToLower(raw)
+		switch {
+		case strings.Contains(lower, "failure"):
+			ctx.FinalStatus = "FAILURE"
+		case strings.Contains(lower, "aborted"):
+			ctx.FinalStatus = "ABORTED"
+		case strings.Contains(lower, "unstable"):
+			ctx.FinalStatus = "UNSTABLE"
+		}
 	}
 
 	for _, m := range jenkinsSkippedRe.FindAllStringSubmatch(raw, -1) {
@@ -81,9 +92,59 @@ func EnrichFromJenkinsLog(ctx *FailureContext, raw string) {
 	if ctx.FailedStage == "" {
 		ctx.FailedStage = detectJenkinsStageFromError(raw)
 	}
+
+	inferSkippedStagesFromFailure(ctx)
+	appendJenkinsEvidence(ctx, raw)
 }
 
-// BuildFailureContext assembles a FailureContext from execution metadata and raw output.
+func inferSkippedStagesFromFailure(ctx *FailureContext) {
+	if ctx.FailedStage == "" {
+		return
+	}
+	idx := -1
+	for i, s := range defaultJenkinsStageOrder {
+		if strings.EqualFold(s, ctx.FailedStage) || strings.Contains(strings.ToLower(ctx.FailedStage), strings.ToLower(s)) {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return
+	}
+	for _, s := range defaultJenkinsStageOrder[idx+1:] {
+		ctx.SkippedStages = appendUnique(ctx.SkippedStages, s)
+	}
+}
+
+func appendJenkinsEvidence(ctx *FailureContext, raw string) {
+	if ctx.FailedStage != "" {
+		ctx.Evidence = appendUniqueEvidence(ctx.Evidence, "Failed Stage: "+ctx.FailedStage)
+	}
+	if ctx.FinalStatus != "" {
+		ctx.Evidence = appendUniqueEvidence(ctx.Evidence, "Pipeline Result: "+ctx.FinalStatus)
+	}
+	for _, s := range ctx.SkippedStages {
+		ctx.Evidence = appendUniqueEvidence(ctx.Evidence, "Skipped Stage: "+s)
+	}
+	lower := strings.ToLower(raw)
+	if strings.Contains(lower, "package.json not found") {
+		ctx.Evidence = appendUniqueEvidence(ctx.Evidence, "Docker Build Error: package.json not found")
+	}
+	if jenkinsDockerFailRe.MatchString(raw) && ctx.FailedStage == "" {
+		ctx.FailedStage = "Docker Build"
+	}
+}
+
+func appendUniqueEvidence(list []string, item string) []string {
+	for _, e := range list {
+		if e == item {
+			return list
+		}
+	}
+	return append(list, item)
+}
+
+// BuildFailureContext assembles a DiagnosticContext from execution metadata and raw output.
 func BuildFailureContext(command, stage, errMsg string, exitCode int, rawOutput string) FailureContext {
 	logs := ExtractRecentLogs(rawOutput, maxRecentLogLines)
 	ctx := FailureContext{

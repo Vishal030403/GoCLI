@@ -1,9 +1,5 @@
 package ai
 
-import (
-	"strings"
-)
-
 type knownRule struct {
 	patterns []string
 	issue    string
@@ -113,7 +109,8 @@ var knownFailureRules = []knownRule{
 		commands: []string{"helm version"},
 	},
 	{
-		patterns: []string{"connection refused", "registry unavailable", "dial tcp", "127.0.0.1:5001"},
+		// Registry rule: do NOT match bare "connection refused" — classifier verifies registry health first.
+		patterns: []string{"registry unavailable", "127.0.0.1:5001", "local-registry", "failed to push", "error pushing"},
 		issue:    "Local container registry is unavailable",
 		root:     "The local Docker registry (127.0.0.1:5001) is not running or not reachable.",
 		explain:  "Kind clusters in this sandbox pull images from the local registry bridged to the kind network.",
@@ -142,25 +139,10 @@ var knownFailureRules = []knownRule{
 	},
 }
 
-// matchKnownFailure returns a local diagnosis when error text matches a known pattern.
+// matchKnownFailure returns a local diagnosis using evidence-aware classification first.
 func matchKnownFailure(ctx FailureContext) (AnalysisResult, bool) {
-	text := strings.ToLower(corpus(ctx))
-
-	for _, rule := range knownFailureRules {
-		for _, pattern := range rule.patterns {
-			if strings.Contains(text, strings.ToLower(pattern)) {
-				return AnalysisResult{
-					Issue:       rule.issue,
-					RootCause:   rule.root,
-					Explanation: rule.explain,
-					Impact:      rule.impact,
-					Resolution:  rule.fix,
-					Prevention:  rule.prevent,
-					FixCommands: rule.commands,
-					Source:      "local",
-				}, true
-			}
-		}
+	if result, _, ok := Classify(ctx); ok {
+		return result, true
 	}
 	return AnalysisResult{}, false
 }

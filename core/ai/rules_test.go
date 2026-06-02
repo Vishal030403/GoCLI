@@ -2,23 +2,21 @@ package ai
 
 import "testing"
 
-func TestMatchKnownFailure_DockerDaemon(t *testing.T) {
-	ctx := FailureContext{
-		Command:    "pipeline prep-ci",
-		Stage:      "Docker Build",
-		Error:      "Cannot connect to the Docker daemon",
-		RecentLogs: []string{"error during connect: open //./pipe/docker_engine: The system cannot find the file specified."},
+func TestEnrichFromJenkinsLog_SkippedStages(t *testing.T) {
+	ctx := FailureContext{}
+	raw := `Stage 'Docker Build' failed
+ERROR: package.json not found
+Stage 'Unit Tests' Skipped due to earlier failure
+Finished: FAILURE`
+	EnrichFromJenkinsLog(&ctx, raw)
+	if ctx.FailedStage == "" {
+		t.Fatal("expected failed stage")
 	}
-
-	result, ok := matchKnownFailure(ctx)
-	if !ok {
-		t.Fatal("expected local match for docker daemon error")
+	if len(ctx.SkippedStages) == 0 {
+		t.Fatal("expected skipped stages")
 	}
-	if result.Source != "local" {
-		t.Fatalf("expected local source, got %q", result.Source)
-	}
-	if result.Issue == "" || result.RootCause == "" {
-		t.Fatal("expected populated diagnosis")
+	if ctx.FinalStatus != "FAILURE" {
+		t.Fatalf("expected FAILURE, got %q", ctx.FinalStatus)
 	}
 }
 

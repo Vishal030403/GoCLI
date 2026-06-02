@@ -7,14 +7,17 @@ import (
 
 // AnalysisResult holds a structured diagnosis from local rules or Gemini.
 type AnalysisResult struct {
-	Issue       string
-	RootCause   string
-	Explanation string
-	Impact      string
-	Resolution  []string
-	Prevention  string
-	FixCommands []string
-	Source      string // "local" or "gemini"
+	Issue          string
+	RootCause      string
+	Explanation    string
+	Impact         string
+	Resolution     []string
+	Prevention     string
+	FixCommands    []string
+	Confidence     Confidence
+	Evidence       []string
+	PossibleCauses []string
+	Source         string // "local" or "gemini"
 }
 
 // Recommendation holds a non-fatal advisory for warnings.
@@ -25,31 +28,47 @@ type Recommendation struct {
 	Benefits     []string
 }
 
-// AnalyzeFailure diagnoses a critical failure. Local rules run first; Gemini is a fallback.
-func AnalyzeFailure(ctx FailureContext) AnalysisResult {
-	if result, ok := matchKnownFailure(ctx); ok {
+// AnalyzeFailure diagnoses a critical failure using evidence collection, classification, then Gemini.
+func AnalyzeFailure(ctx DiagnosticContext) AnalysisResult {
+	CollectEvidence(&ctx)
+
+	if result, conf, ok := Classify(ctx); ok {
+		result.Confidence = conf
+		result.Evidence = ctx.Evidence
 		return result
 	}
+
 	result, err := analyzeWithGemini(ctx)
 	if err != nil {
-		return fallbackResult(ctx, err)
+		fb := fallbackResult(ctx, err)
+		fb.Evidence = ctx.Evidence
+		fb.Confidence = ConfidenceLow
+		fb.PossibleCauses = lowConfidenceHypotheses(ctx)
+		return fb
+	}
+	result.Confidence = inferGeminiConfidence(ctx, result)
+	result.Evidence = ctx.Evidence
+	if result.Confidence == ConfidenceLow {
+		result.PossibleCauses = lowConfidenceHypotheses(ctx)
 	}
 	return result
 }
 
 // AnalyzeLogs is the entry point for standalone log analysis (pipeline logs analyze).
-// It parses logs into structured context before attempting local or Gemini diagnosis.
 func AnalyzeLogs(logContent string) (AnalysisResult, error) {
 	ctx := BuildFailureContext("pipeline logs analyze", "Log Analysis", "", 1, logContent)
 	ctx.Command = "pipeline logs analyze"
 	result := AnalyzeFailure(ctx)
-	if result.Issue == "" && result.RootCause == "" {
+	if result.Confidence == ConfidenceLow && result.Issue == "" && result.RootCause == "" {
+		return result, fmt.Errorf("could not determine root cause")
+	}
+	if result.Issue == "" && result.RootCause == "" && len(result.PossibleCauses) == 0 {
 		return result, fmt.Errorf("could not determine root cause")
 	}
 	return result, nil
 }
 
-func analyzeWithGemini(ctx FailureContext) (AnalysisResult, error) {
+func analyzeWithGemini(ctx DiagnosticContext) (AnalysisResult, error) {
 	var result AnalysisResult
 
 	client, err := NewClient()
@@ -59,48 +78,23 @@ func analyzeWithGemini(ctx FailureContext) (AnalysisResult, error) {
 	defer client.Close()
 
 	systemPrompt := `You are a Senior DevOps Engineer.
-Analyze this failure and respond with ONLY valid JSON in this exact structure:
+Diagnose based ONLY on the verified evidence provided. Do not assume facts not present in the evidence.
+If evidence is insufficient, say so in the explanation and list plausible causes without claiming certainty.
+
+Respond with ONLY valid JSON in this exact structure:
 {
-  "issue": "string — short title of the problem",
+  "issue": "string — short title",
   "root_cause": "string",
-  "explanation": "string — why it happened, for a developer with limited DevOps knowledge",
+  "explanation": "string — for a developer with limited DevOps knowledge",
   "impact": "string",
-  "resolution": ["string step 1", "string step 2"],
+  "resolution": ["step 1", "step 2"],
   "prevention": "string",
-  "fix_commands": ["optional shell command"]
+  "fix_commands": ["optional shell command"],
+  "confidence": "High" or "Medium" or "Low"
 }
 Keep each field concise and actionable.`
 
-	logBlock := strings.Join(ctx.RecentLogs, "\n")
-	if logBlock == "" {
-		logBlock = "(no recent log lines captured)"
-	}
-
-	skipped := "none"
-	if len(ctx.SkippedStages) > 0 {
-		skipped = strings.Join(ctx.SkippedStages, ", ")
-	}
-
-	userMessage := fmt.Sprintf(`Analyze this failure.
-
-Command:
-%s
-
-Failed Stage:
-%s
-
-Error:
-%s
-
-Exit Code:
-%d
-
-Skipped Stages:
-%s
-
-Recent Logs:
-%s`,
-		ctx.Command, ctx.FailedStage, ctx.Error, ctx.ExitCode, skipped, logBlock)
+	userMessage := buildGeminiPayload(ctx)
 
 	responseText, err := client.Complete(systemPrompt, userMessage)
 	if err != nil {
@@ -117,10 +111,19 @@ Recent Logs:
 		Resolution  []string `json:"resolution"`
 		Prevention  string   `json:"prevention"`
 		FixCommands []string `json:"fix_commands"`
+		Confidence  string   `json:"confidence"`
 	}
 	var raw rawResult
 	if err := parseJSON(cleaned, &raw); err != nil {
 		return result, fmt.Errorf("AI returned invalid JSON: %w", err)
+	}
+
+	conf := ConfidenceMedium
+	switch strings.ToLower(raw.Confidence) {
+	case "high":
+		conf = ConfidenceHigh
+	case "low":
+		conf = ConfidenceLow
 	}
 
 	result = AnalysisResult{
@@ -131,20 +134,120 @@ Recent Logs:
 		Resolution:  raw.Resolution,
 		Prevention:  raw.Prevention,
 		FixCommands: raw.FixCommands,
+		Confidence:  conf,
 		Source:      "gemini",
 	}
 	return result, nil
 }
 
-func fallbackResult(ctx FailureContext, err error) AnalysisResult {
+// buildGeminiPayload formats structured evidence for Gemini (no full log dumps).
+func buildGeminiPayload(ctx DiagnosticContext) string {
+	var b strings.Builder
+	b.WriteString("Analyze this failure using ONLY the verified evidence below.\n\n")
+
+	b.WriteString("Command:\n")
+	b.WriteString(ctx.Command + "\n\n")
+
+	b.WriteString("Failed Stage:\n")
+	stage := ctx.FailedStage
+	if stage == "" {
+		stage = ctx.Stage
+	}
+	b.WriteString(stage + "\n\n")
+
+	b.WriteString("Error:\n")
+	b.WriteString(ctx.Error + "\n\n")
+
+	fmt.Fprintf(&b, "Exit Code: %d\n\n", ctx.ExitCode)
+
+	if ctx.FinalStatus != "" {
+		b.WriteString("Pipeline Result: " + ctx.FinalStatus + "\n\n")
+	}
+	if len(ctx.SkippedStages) > 0 {
+		b.WriteString("Skipped Stages: " + strings.Join(ctx.SkippedStages, ", ") + "\n\n")
+	}
+
+	b.WriteString("Verified Evidence:\n")
+	writeEvidenceLine(&b, "Pod Status", ctx.PodStatus)
+	if ctx.PodName != "" {
+		writeEvidenceLine(&b, "Pod", ctx.PodNamespace+"/"+ctx.PodName)
+	}
+	if ctx.PodRestarts > 0 {
+		fmt.Fprintf(&b, "* Pod Restarts: %d\n", ctx.PodRestarts)
+	}
+	writeEvidenceLine(&b, "Service Exists", boolStr(ctx.ServiceExists))
+	writeEvidenceLine(&b, "Registry Reachable", boolStr(ctx.RegistryReachable))
+	writeEvidenceLine(&b, "Registry Status", ctx.RegistryStatus)
+	writeEvidenceLine(&b, "Docker Daemon OK", boolStr(ctx.DockerDaemonOK))
+	writeEvidenceLine(&b, "Jenkins Status", ctx.JenkinsStatus)
+	if ctx.PortForwardFailed {
+		b.WriteString("* Port Forward Failed: Yes\n")
+	}
+	if ctx.TunnelEstablished {
+		b.WriteString("* Tunnel Established: Yes\n")
+	}
+	for _, e := range ctx.Evidence {
+		b.WriteString("* " + e + "\n")
+	}
+
+	// Trimmed log summary only (not full pipeline output)
+	if summary := logSummary(ctx.RecentLogs); summary != "" {
+		b.WriteString("\nLog Summary (trimmed):\n")
+		b.WriteString(summary)
+	}
+
+	b.WriteString("\nProvide: root cause, explanation, impact, resolution, prevention.\n")
+	return b.String()
+}
+
+func writeEvidenceLine(b *strings.Builder, label, value string) {
+	if value == "" {
+		return
+	}
+	fmt.Fprintf(b, "* %s: %s\n", label, value)
+}
+
+func boolStr(v bool) string {
+	if v {
+		return "Yes"
+	}
+	return "No"
+}
+
+func logSummary(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	max := 8
+	if len(lines) > max {
+		lines = lines[len(lines)-max:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+func inferGeminiConfidence(ctx DiagnosticContext, result AnalysisResult) Confidence {
+	if result.Confidence != "" {
+		return result.Confidence
+	}
+	if hasStrongEvidence(ctx) && result.RootCause != "" {
+		return ConfidenceMedium
+	}
+	return ConfidenceLow
+}
+
+func fallbackResult(ctx DiagnosticContext, err error) AnalysisResult {
+	stage := ctx.Stage
+	if ctx.FailedStage != "" {
+		stage = ctx.FailedStage
+	}
 	return AnalysisResult{
-		Issue:       ctx.Stage + " failed",
+		Issue:       stage + " failed",
 		RootCause:   ctx.Error,
-		Explanation: "Automated analysis could not reach Gemini. Review the error and recent logs below.",
+		Explanation: "Automated analysis could not reach Gemini. Review the error and verified evidence below.",
 		Impact:      "The pipeline stopped at this stage.",
 		Resolution: []string{
 			"Review the error output above.",
-			fmt.Sprintf("Re-run after fixing: %s", ctx.Stage),
+			fmt.Sprintf("Re-run after fixing: %s", stage),
 		},
 		Prevention: fmt.Sprintf("Analysis unavailable: %v", err),
 		Source:     "local",
@@ -261,21 +364,47 @@ func PrintAnalysis(result AnalysisResult) {
 		fmt.Printf("   %s\n", result.Issue)
 		fmt.Println()
 	}
+
+	if len(result.Evidence) > 0 {
+		fmt.Println("\033[1mEvidence:\033[0m")
+		for _, e := range result.Evidence {
+			fmt.Printf("   • %s\n", e)
+		}
+		fmt.Println()
+	}
+
+	if result.Confidence != "" {
+		fmt.Println("\033[1mConfidence:\033[0m")
+		fmt.Printf("   %s\n", result.Confidence)
+		fmt.Println()
+	}
+
 	if result.RootCause != "" {
 		fmt.Println("\033[1mRoot Cause:\033[0m")
 		fmt.Printf("   %s\n", result.RootCause)
 		fmt.Println()
 	}
+
 	if result.Explanation != "" {
 		fmt.Println("\033[1mExplanation:\033[0m")
 		fmt.Printf("   %s\n", result.Explanation)
 		fmt.Println()
 	}
+
 	if result.Impact != "" {
 		fmt.Println("\033[1mImpact:\033[0m")
 		fmt.Printf("   %s\n", result.Impact)
 		fmt.Println()
 	}
+
+	if len(result.PossibleCauses) > 0 && result.Confidence == ConfidenceLow {
+		fmt.Println("\033[1mPossible Causes:\033[0m")
+		for i, c := range result.PossibleCauses {
+			fmt.Printf("   %d. %s\n", i+1, c)
+		}
+		fmt.Println()
+	}
+
 	if len(result.Resolution) > 0 {
 		fmt.Println("\033[1mResolution:\033[0m")
 		for i, step := range result.Resolution {
@@ -283,11 +412,13 @@ func PrintAnalysis(result AnalysisResult) {
 		}
 		fmt.Println()
 	}
+
 	if result.Prevention != "" {
 		fmt.Println("\033[1mPrevention:\033[0m")
 		fmt.Printf("   %s\n", result.Prevention)
 		fmt.Println()
 	}
+
 	if len(result.FixCommands) > 0 {
 		for _, cmd := range result.FixCommands {
 			fmt.Printf("   \033[0;32m$ %s\033[0m\n", cmd)
@@ -327,7 +458,7 @@ func PrintRecommendations(recs []Recommendation) {
 	}
 }
 
-// HandleFailure runs analysis and prints results for a failed stage. Does not exit.
+// HandleFailure collects evidence, runs analysis, and prints results. Does not exit.
 func HandleFailure(ctx FailureContext) {
 	result := AnalyzeFailure(ctx)
 	PrintAnalysis(result)
