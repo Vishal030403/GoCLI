@@ -15,22 +15,19 @@ func RunSetupChecks() {
 
 	// 0. Internet Check
 	if err := CheckInternet(); err != nil {
-		fmt.Printf("\033[1;31m❌ %s\033[0m\n", err.Error())
-		os.Exit(1)
+		exitWithAnalysis("Internet Check", err.Error())
 	}
 	fmt.Println("\033[1;32m✓\033[0m Internet connection verified")
 
 	// 1. Check System Dependencies
 	if err := CheckDependencies(); err != nil {
-		fmt.Printf("\033[1;31m❌ %s\033[0m\n", err.Error())
-		os.Exit(1)
+		exitWithAnalysis("Dependency Check", err.Error())
 	}
 	fmt.Println("\033[1;32m✓\033[0m Core dependencies found (docker, kind, kubectl)")
 
 	// 2. Ensure Docker is awake
 	if err := EnsureDockerRunning(); err != nil {
-		fmt.Printf("\033[1;31m❌ %s\033[0m\n", err.Error())
-		os.Exit(1)
+		exitWithAnalysis("Docker Check", err.Error())
 	}
 	fmt.Println("\033[1;32m✓\033[0m Docker daemon is active")
 
@@ -38,8 +35,7 @@ func RunSetupChecks() {
 	ports := []int{5001, 8080}
 	for _, port := range ports {
 		if err := checkPortAvailable(port); err != nil {
-			fmt.Printf("\033[1;31m❌ %s\033[0m\n", err.Error())
-			os.Exit(1)
+			exitWithAnalysis("Port Check", err.Error())
 		}
 	}
 	fmt.Println("\033[1;32m✓\033[0m Required network ports (5001, 8080) are available")

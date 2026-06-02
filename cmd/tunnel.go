@@ -10,6 +10,9 @@ import (
 	"strings"
 	"syscall"
 
+	"pipeline-cli/core"
+	"pipeline-cli/core/ai"
+
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +20,7 @@ var tunnelCmd = &cobra.Command{
 	Use:   "tunnel",
 	Short: "Opens a secure port-forward tunnel to your deployed application",
 	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline tunnel"
 		cwd, _ := os.Getwd()
 		rawName := filepath.Base(cwd)
 		appName := strings.ToLower(rawName)
@@ -43,15 +47,27 @@ var tunnelCmd = &cobra.Command{
 			os.Exit(0)
 		}()
 
-		// NATIVE OS EXECUTION (No Bash!)
 		c := exec.Command("kubectl", "port-forward", fmt.Sprintf("svc/%s", appName), "8081:80", "-n", namespace)
-		c.Stdout = os.Stdout
-		c.Stderr = os.Stderr
+		stdout, stderr, buf := ai.LiveOutputWriters(30)
+		c.Stdout = stdout
+		c.Stderr = stderr
 		c.Stdin = os.Stdin
-		
+
 		err := c.Run()
 		if err != nil {
-			fmt.Println("\n\033[31m❌ Tunnel disconnected or failed to start. Is the app fully deployed and '1/1 Ready'?\033[0m")
+			fmt.Println("\n\033[31m❌ Tunnel disconnected or failed to start.\033[0m")
+			exitCode := 1
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			}
+			ctx := ai.BuildFailureContext(
+				"pipeline tunnel",
+				"Port Forward",
+				err.Error(),
+				exitCode,
+				buf.Text(),
+			)
+			ai.HandleFailure(ctx)
 		}
 	},
 }

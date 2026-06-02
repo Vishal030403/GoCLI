@@ -3,6 +3,9 @@ package policy
 import (
 	"fmt"
 	"strings"
+
+	"pipeline-cli/core"
+	"pipeline-cli/core/ai"
 )
 
 const (
@@ -15,6 +18,7 @@ const (
 )
 
 // PrintReport prints a formatted policy check report to stdout.
+// Emits AI recommendations for warnings and analysis for error-severity failures.
 // Returns true if any error-severity policy failed (so the caller can exit 1).
 func PrintReport(results []PolicyResult) bool {
 	separator := strings.Repeat("─", 52)
@@ -27,6 +31,7 @@ func PrintReport(results []PolicyResult) bool {
 	warnings := 0
 	failed := 0
 	anyErrorFailed := false
+	var warningItems []ai.WarningItem
 
 	for _, r := range results {
 		if r.Passed {
@@ -36,6 +41,7 @@ func PrintReport(results []PolicyResult) bool {
 			warnings++
 			fmt.Printf("%s⚠️  WARN%s  [%-12s] %s\n", colorYellow, colorReset, r.Category, r.PolicyName)
 			printFindings(r)
+			warningItems = append(warningItems, toWarningItem(r))
 		} else {
 			failed++
 			anyErrorFailed = true
@@ -52,12 +58,78 @@ func PrintReport(results []PolicyResult) bool {
 	)
 	fmt.Printf("%s\n\n", separator)
 
+	if len(warningItems) > 0 {
+		ai.PrintRecommendations(ai.RecommendForWarnings(warningItems))
+	}
+
+	if anyErrorFailed {
+		for _, r := range results {
+			if !r.Passed && r.Severity != "warning" {
+				ai.HandleFailure(buildPolicyFailureContext(r))
+				break
+			}
+		}
+	}
+
 	return anyErrorFailed
+}
+
+func toWarningItem(r PolicyResult) ai.WarningItem {
+	item := ai.WarningItem{
+		PolicyName: r.PolicyName,
+		Category:   r.Category,
+		Message:    r.Message,
+	}
+	for _, f := range r.Findings {
+		if f.File != "" && f.Line > 0 {
+			item.Findings = append(item.Findings, fmt.Sprintf("%s:%d — %s", f.File, f.Line, f.Detail))
+		} else if f.File != "" {
+			item.Findings = append(item.Findings, fmt.Sprintf("%s — %s", f.File, f.Detail))
+		} else {
+			item.Findings = append(item.Findings, f.Detail)
+		}
+	}
+	return item
+}
+
+func buildPolicyFailureContext(r PolicyResult) ai.FailureContext {
+	cmd := core.CommandName
+	if cmd == "" {
+		cmd = "pipeline policy check"
+	}
+
+	errMsg := r.Message
+	if errMsg == "" && len(r.Findings) > 0 {
+		errMsg = r.Findings[0].Detail
+	}
+	if errMsg == "" {
+		errMsg = "policy check failed: " + r.PolicyName
+	}
+
+	var logs []string
+	for _, f := range r.Findings {
+		if f.File != "" {
+			logs = append(logs, fmt.Sprintf("%s — %s", f.File, f.Detail))
+		} else {
+			logs = append(logs, f.Detail)
+		}
+	}
+	if r.Message != "" {
+		logs = append(logs, r.Message)
+	}
+
+	return ai.FailureContext{
+		Command:     cmd,
+		Stage:       "Policy Check",
+		FailedStage: r.PolicyName,
+		Error:       errMsg,
+		ExitCode:    1,
+		RecentLogs:  logs,
+	}
 }
 
 func printFindings(r PolicyResult) {
 	if len(r.Findings) == 0 {
-		// No specific findings — print the policy-level message
 		if r.Message != "" {
 			fmt.Printf("         → %s\n", r.Message)
 		}

@@ -23,43 +23,62 @@ var testCmd = &cobra.Command{
 var lintCmd = &cobra.Command{
 	Use:   "lint",
 	Short: "Run code linters",
-	Run: func(cmd *cobra.Command, args []string) { lintCode() },
+	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline test lint"
+		lintCode()
+	},
 }
 
 var dockerCmd = &cobra.Command{
 	Use:   "docker",
 	Short: "Checks Dockerfile for best practices and optimization",
-	Run: func(cmd *cobra.Command, args []string) { lintDocker() },
+	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline test docker"
+		lintDocker()
+	},
 }
 
 var k8sCmd = &cobra.Command{
 	Use:   "k8s",
 	Short: "Validates Kubernetes manifests against official schemas",
-	Run: func(cmd *cobra.Command, args []string) { lintK8s() },
+	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline test k8s"
+		lintK8s()
+	},
 }
 
 var securityCmd = &cobra.Command{
 	Use:   "security",
 	Short: "Runs a deep security audit on all Infrastructure as Code",
-	Run: func(cmd *cobra.Command, args []string) { securityScan() },
+	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline test security"
+		securityScan()
+	},
 }
 
 var unitCmd = &cobra.Command{
 	Use:   "unit",
 	Short: "Run unit tests",
-	Run: func(cmd *cobra.Command, args []string) { unitTests() },
+	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline test unit"
+		unitTests()
+	},
 }
 
 var pipelineCmd = &cobra.Command{
 	Use:   "pipeline",
 	Short: "Validates the CI/CD Jenkinsfile for syntax errors",
-	Run: func(cmd *cobra.Command, args []string) { lintPipeline() },
+	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline test pipeline"
+		lintPipeline()
+	},
 }
 
 var allCmd = &cobra.Command{
 	Use:   "all",
 	Short: "Run all tests",
 	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline test all"
 		fmt.Println("Starting Full Test Suite...")
 		lintCode(); lintDocker(); lintK8s(); securityScan(); unitTests(); lintPipeline()
 		fmt.Println("All tests finished.")
@@ -70,6 +89,7 @@ var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Shift-Left: Runs all local linters, unit tests, and security scans before deployment",
 	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline validate"
 		fmt.Println("\033[1;36m🔎 Starting Local Validation (Shift-Left)...\033[0m")
 		lintCode(); lintDocker(); lintK8s(); securityScan(); unitTests(); lintPipeline()
 

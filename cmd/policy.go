@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
+	"pipeline-cli/core"
 	"pipeline-cli/core/config"
 	"pipeline-cli/core/policy"
 	"pipeline-cli/policies"
@@ -65,6 +66,7 @@ var policyCheckCmd = &cobra.Command{
 	Use:   "check",
 	Short: "Run policy checks against the current project",
 	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline policy check"
 		cwd, _ := os.Getwd()
 		cfg, err := config.LoadConfig(cwd)
 		if err != nil {

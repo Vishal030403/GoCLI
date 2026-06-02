@@ -17,9 +17,10 @@ import (
 var prepCiCmd = &cobra.Command{
     Use:   "prep-ci",
     Short: "Spins up an empty ephemeral cluster, registry, and Jenkins sandbox",
-    Run: func(cmd *cobra.Command, args []string) {
- 
-        // 1. RUN PREFLIGHT
+	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline prep-ci"
+
+		// 1. RUN PREFLIGHT
         preflight.RunSetupChecks()
  
         clusterName := "ephemeral-test"
