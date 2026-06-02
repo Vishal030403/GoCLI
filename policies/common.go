@@ -100,3 +100,24 @@ func detectFramework(projectPath string) string {
 	}
 	return "unknown"
 }
+
+// walkK8sFiles visits every .yml / .yaml file under the k8s/ subdirectory of
+// projectPath, skipping template files (.tmpl). Unlike walkSourceFiles it does
+// NOT apply ignoreDirs because directories such as build or dist are irrelevant
+// in a K8s manifests tree.
+func walkK8sFiles(projectPath string, visitor func(path string)) {
+	k8sDir := filepath.Join(projectPath, "k8s")
+	if _, err := os.Stat(k8sDir); os.IsNotExist(err) {
+		return
+	}
+	filepath.WalkDir(k8sDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		ext := filepath.Ext(path)
+		if (ext == ".yml" || ext == ".yaml") && !strings.HasSuffix(path, ".tmpl") {
+			visitor(path)
+		}
+		return nil
+	})
+}

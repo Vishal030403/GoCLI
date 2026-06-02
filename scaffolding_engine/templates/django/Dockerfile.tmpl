@@ -16,9 +16,9 @@ USER appuser
 
 # 🩺 Healthcheck for Docker Checkov compliance
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-CMD curl --fail http://localhost:{{ .app_port }}/ || exit 1
+CMD curl --fail http://localhost:{{ .app_port }}{{ .health_path }} || exit 1
 
 EXPOSE {{ .app_port }}
 
 # Run Django, forcing it to listen on all interfaces
-CMD ["python", "main/manage.py", "runserver", "0.0.0.0:{{ .app_port }}"]
+CMD {{ .run_command }}

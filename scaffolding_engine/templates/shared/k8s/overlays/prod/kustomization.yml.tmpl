@@ -1,0 +1,9 @@
+resources:
+  - ../../base
+images:
+  - name: {{ .app_name }}
+    newName: 127.0.0.1:5001/{{ .app_name }}
+    newTag: latest
+patches:
+  - path: patch-deployment.yml
+  - path: patch-ingress.yml

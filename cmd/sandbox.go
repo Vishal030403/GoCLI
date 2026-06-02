@@ -1,6 +1,7 @@
 package cmd
  
 import (
+    "bufio"
     "fmt"
     "os"
     "os/exec"
@@ -315,46 +316,97 @@ curl -s -X POST "http://localhost:8080/job/%s/build" \
 }
  
 var destroyCiCmd = &cobra.Command{
-    Use:   "destroy-ci",
-    Short: "Completely destroys the local CI/CD sandbox",
-    Run: func(cmd *cobra.Command, args []string) {
- 
-        clusterName := "ephemeral-test"
- 
-        fmt.Println("\033[1;31m💥 Commencing total teardown...\033[0m")
- 
-        core.ExecCommand(
-            "Nuking containers",
-            true,
-            false,
-            "docker", "rm", "-f",
-            jenkinsName,
-            "local-registry",
-            "jenkins-sandbox",
-        )
- 
-        core.ExecCommand(
-            "Wiping persistent data",
-            true,
-            false,
-            "docker", "volume", "rm",
-            "local-jenkins-data",
-            "local-registry-data",
-        )
- 
-        core.ExecCommand(
-            "Destroying Kind cluster",
-            true,
-            true,
-            "kind", "delete", "cluster",
-            "--name", clusterName,
-        )
- 
-        fmt.Println("\033[1;36m🔄 Restoring network context (Native)...\033[0m")
-        patchKubeConfig("host.docker.internal", "127.0.0.1")
- 
-        fmt.Println("\n\033[1;32m🧹 Clean slate! Everything destroyed safely.\033[0m\n")
-    },
+	Use:   "destroy-ci",
+	Short: "Completely destroys the local CI/CD sandbox and optional scaffolding files",
+	Run: func(cmd *cobra.Command, args []string) {
+
+		clusterName := "ephemeral-test"
+
+		fmt.Println("\033[1;31m💥 Commencing total teardown...\033[0m")
+
+		core.ExecCommand(
+			"Nuking containers",
+			true,
+			false,
+			"docker", "rm", "-f",
+			jenkinsName,
+			"local-registry",
+			"jenkins-sandbox",
+		)
+
+		core.ExecCommand(
+			"Wiping persistent data",
+			true,
+			false,
+			"docker", "volume", "rm",
+			"local-jenkins-data",
+			"local-registry-data",
+		)
+
+		core.ExecCommand(
+			"Destroying Kind cluster",
+			true,
+			true,
+			"kind", "delete", "cluster",
+			"--name", clusterName,
+		)
+
+		fmt.Println("\033[1;36m🔄 Restoring network context (Native)...\033[0m")
+		patchKubeConfig("host.docker.internal", "127.0.0.1")
+
+		fmt.Println("\n\033[1;32m🧹 Infrastructure destroyed safely.\033[0m")
+
+		// --- NEW LOGIC: Interactive Scaffolding Cleanup ---
+		fmt.Println("\n\033[1;33m⚠️  Do you also want to delete the generated scaffolding files from this project?\033[0m")
+		fmt.Println("  (This will remove Dockerfile, Jenkinsfile, pipeline.yaml, and the entire k8s/ directory)")
+		fmt.Print("Proceed? (y/N): ")
+
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(strings.ToLower(response))
+
+		if response == "y" || response == "yes" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Printf("\033[1;31m❌ Could not get current directory: %v\033[0m\n", err)
+				return
+			}
+
+			filesToRemove := []string{
+				"Dockerfile",
+				"Jenkinsfile",
+				"pipeline.yaml",
+				"k8s",
+			}
+
+			fmt.Println("\n\033[1;36m🧹 Cleaning up CI/CD files...\033[0m")
+			deletedCount := 0
+
+			for _, file := range filesToRemove {
+				targetPath := filepath.Join(cwd, file)
+
+				if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+					continue
+				}
+
+				err = os.RemoveAll(targetPath)
+				if err != nil {
+					fmt.Printf("\033[1;31m❌ Failed to delete %s: %v\033[0m\n", file, err)
+				} else {
+					fmt.Printf("\033[1;32m✓\033[0m Deleted %s\n", file)
+					deletedCount++
+				}
+			}
+
+			if deletedCount == 0 {
+				fmt.Println("No scaffolding files found to delete.")
+			} else {
+				fmt.Println("\n\033[1;32m✨ Clean slate! All files and infrastructure destroyed.\033[0m\n")
+			}
+		} else {
+			fmt.Println("\n\033[1;32m✨ Teardown complete! (Kept local scaffolding files)\033[0m\n")
+		}
+	},
 }
  
 func init() {

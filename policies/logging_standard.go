@@ -1,6 +1,7 @@
 package policies
 
 import (
+	"path/filepath"
 	"strings"
 
 	"pipeline-cli/core/policy"
@@ -69,7 +70,10 @@ func scanForPattern(projectPath, path, pattern string) []policy.Finding {
 	if lines == nil {
 		return nil
 	}
-	rel, _ := relPath(projectPath, path)
+	
+	// 💡 THE FIX: Use standard library OS-aware path resolution
+	rel, _ := filepath.Rel(projectPath, path)
+	
 	var findings []policy.Finding
 	for lineNum, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -85,15 +89,4 @@ func scanForPattern(projectPath, path, pattern string) []policy.Finding {
 		}
 	}
 	return findings
-}
-
-// relPath is a thin wrapper to avoid importing filepath in multiple places.
-func relPath(base, target string) (string, error) {
-	import_path_helper := target
-	if len(base) > 0 && strings.HasPrefix(target, base) {
-		import_path_helper = strings.TrimPrefix(target, base)
-		import_path_helper = strings.TrimPrefix(import_path_helper, "/")
-		import_path_helper = strings.TrimPrefix(import_path_helper, "\\")
-	}
-	return import_path_helper, nil
 }

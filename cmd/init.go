@@ -22,17 +22,25 @@ var initCmd = &cobra.Command{
 			return
 		}
 
-		// Detect framework first
 		framework, entryPath := detector.DetectFramework(cwd)
 		fmt.Printf("Detected framework: %s\n", framework)
 
+		var aiResult *detector.AIDetectionResult
+
 		if framework == "unknown" {
-			fmt.Println("Could not detect a supported framework.")
-			return
+			fmt.Println("\033[1;36m🤖 Unknown framework detected. Consulting AI for identification...\033[0m")
+			result, err := detector.AIDetectFramework(cwd)
+			if err != nil {
+				fmt.Printf("\033[33m⚠️  AI detection failed: %s\033[0m\n", err.Error())
+				fmt.Println("Could not detect or identify the framework.")
+				return
+			}
+			framework = result.Framework
+			entryPath = result.EntryPath
+			aiResult = &result
 		}
 
-		// Generate scaffolding files
-		err = generator.GenerateFiles(framework, cwd, entryPath)
+		err = generator.GenerateFiles(framework, cwd, entryPath, aiResult)
 		if err != nil {
 			fmt.Printf("\033[1;31m❌ %s\033[0m\n", err.Error())
 			os.Exit(1)

@@ -98,11 +98,20 @@ func DetectFramework(projectPath string) (string, string) {
 		return "django", relPath
 	}
 
-	// ── 3. JavaScript Frameworks (Standardized Commands) ─────────────────────
+// ── 3. JavaScript Frameworks (Standardized Commands) ─────────────────────
 	if packageJsonPath, ok := findFileDeep(projectPath, "package.json"); ok {
+		
+		// 1. Check for Next.js FIRST (Meta-framework overrides base libraries)
+		if fileContains(packageJsonPath, `"next"`) {
+			return "unknown", "" // Send to AI
+		}
+
+		// 2. Standard React SPA fallback
 		if fileContains(packageJsonPath, `"react"`) || fileContains(packageJsonPath, `"react-scripts"`) {
 			return "react", ""
 		}
+		
+		// 3. Other Node apps
 		if fileContains(packageJsonPath, `"express"`) {
 			return "expressjs", ""
 		}

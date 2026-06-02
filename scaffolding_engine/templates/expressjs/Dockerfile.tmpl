@@ -7,12 +7,13 @@ RUN npm install
 COPY . .
 
 # 🔒 Checkov standard: Never run as root!
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup && chown -R appuser /usr/src/app
+RUN apk add --no-cache curl && \
+    addgroup -S appgroup && adduser -S appuser -G appgroup && chown -R appuser /usr/src/app
 USER appuser
 
 # 🩺 Healthcheck for Docker Checkov compliance
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl --fail http://localhost:{{ .app_port }}/ || exit 1
+  CMD curl --fail http://localhost:{{ .app_port }}{{ .health_path }} || exit 1
 
 EXPOSE {{ .app_port }}
 

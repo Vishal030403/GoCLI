@@ -1,0 +1,105 @@
+version: "1"
+dockerfile_standards:
+  workdir: "/app"
+  non_root:
+    alpine_user_setup: "addgroup -S appgroup && adduser -S appuser -G appgroup"
+    debian_user_setup: "groupadd -r appgroup && useradd -r -g appgroup appuser"
+    user_directive: "USER appuser"
+  curl_installation:
+    alpine: "RUN apk add --no-cache curl"
+    debian: "# curl available by default in slim images"
+  healthcheck:
+    interval: "30s"
+    timeout: "5s"
+    start_period: "10s"
+    retries: 3
+    command_template: "curl --fail http://localhost:{port}{health_path} || exit 1"
+  read_only_filesystem: true
+deployment_standards:
+  registry: "127.0.0.1:5001"
+  image_pull_policy: "Always"
+  security_context:
+    pod:
+      automount_service_account_token: false
+      run_as_non_root: true
+      run_as_user: 1000
+      run_as_group: 1000
+      fs_group: 1000
+    container:
+      allow_privilege_escalation: false
+      read_only_root_filesystem: true
+      drop_capabilities: ["ALL"]
+  resources:
+    requests: {cpu: "100m", memory: "128Mi"}
+    limits: {cpu: "500m", memory: "512Mi"}
+  probes:
+    readiness: {initial_delay_seconds: 10, period_seconds: 5}
+    liveness: {initial_delay_seconds: 15, period_seconds: 20, failure_threshold: 3}
+runtime_defaults:
+  python:
+    base_image: "python:{version}-slim"
+    default_version: "3.12"
+    default_port: 8000
+    package_install: "pip install --no-cache-dir -r requirements.txt"
+    entry_files: ["manage.py", "main.py", "app.py", "wsgi.py", "asgi.py"]
+    image_type: "debian_slim"
+  node:
+    base_image: "node:{version}-alpine"
+    default_version: "22"
+    default_port: 3000
+    package_install: "npm ci"
+    image_type: "alpine"
+  react:
+    build_base_image: "node:{version}-alpine"
+    run_base_image: "nginx:1.27-alpine"
+    default_version: "22"
+    default_port: 8080
+    build_command: "npm run build"
+    static_output_dir: "dist"
+    image_type: "alpine"
+  java:
+    build_base_image: "maven:{version}-eclipse-temurin"
+    run_base_image: "eclipse-temurin:{version}-jre-alpine"
+    default_version: "17"
+    default_port: 8080
+    build_command: "./mvnw package -DskipTests"
+    jar_pattern: "target/*.jar"
+    image_type: "alpine"
+  go:
+    build_base_image: "golang:{version}-alpine"
+    run_base_image: "alpine:3.19"
+    default_version: "1.22"
+    default_port: 8080
+    build_command: "go build -o main ."
+    binary: "./main"
+    image_type: "alpine"
+  ruby:
+    base_image: "ruby:{version}-alpine"
+    default_version: "3.3"
+    default_port: 3000
+    package_install: "bundle install"
+    image_type: "alpine"
+  dotnet:
+    build_base_image: "mcr.microsoft.com/dotnet/sdk:{version}"
+    run_base_image: "mcr.microsoft.com/dotnet/aspnet:{version}"
+    default_version: "8.0"
+    default_port: 8080
+    image_type: "debian_slim"
+  rust:
+    build_base_image: "rust:{version}-alpine"
+    run_base_image: "alpine:3.19"
+    default_version: "1.77"
+    default_port: 8080
+    build_command: "cargo build --release"
+    image_type: "alpine"
+approved_base_images:
+  - "python"
+  - "node"
+  - "nginx"
+  - "golang"
+  - "maven"
+  - "eclipse-temurin"
+  - "ruby"
+  - "rust"
+  - "alpine"
+  - "mcr.microsoft.com/dotnet"
