@@ -31,6 +31,7 @@ func Classify(ctx DiagnosticContext) (AnalysisResult, Confidence, bool) {
 
 	// --- Connection refused: context-aware (never assume registry alone) ---
 	if strings.Contains(text, "connection refused") || strings.Contains(text, "connect: connection refused") {
+		podCrash := strings.Contains(strings.ToLower(ctx.PodStatus), "crashloopbackoff")
 		if podCrash || strings.Contains(strings.ToLower(ctx.PodStatus), "error") {
 			return applicationUnreachableResult(ctx), ConfidenceHigh, true
 		}

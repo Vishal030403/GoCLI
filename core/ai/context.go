@@ -41,3 +41,11 @@ type DiagnosticContext struct {
 
 // FailureContext is an alias for backward compatibility with existing call sites.
 type FailureContext = DiagnosticContext
+
+// WarningItem represents a non-fatal policy or validation finding.
+type WarningItem struct {
+	PolicyName string
+	Category   string
+	Message    string
+	Findings   []string
+}
