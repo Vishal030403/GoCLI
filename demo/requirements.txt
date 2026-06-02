@@ -1,2 +1,10 @@
-# No third-party packages required.
-# This demo uses tkinter from the Python standard library.
+# Pipeline CLI Demo — browser UI (http://127.0.0.1:8080/)
+# Python 3.10+
+#
+# Stdlib only: http.server, webbrowser, json, urllib
+# No third-party packages — leave this file empty for pip, or run without installing:
+#
+#   cd demo
+#   python main.py
+#
+# Health check: GET /health → {"status": "ok"}
