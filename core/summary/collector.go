@@ -1,9 +1,6 @@
 package summary
 
-import (
-	"strings"
-	"time"
-)
+import "strings"
 
 // StructuredPayload builds JSON for Gemini — structured state only, no logs.
 func StructuredPayload(state ExecutionState) map[string]interface{} {
