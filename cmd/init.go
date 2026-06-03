@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"pipeline-cli/core"
+	"pipeline-cli/core/summary"
 	"pipeline-cli/scaffolding_engine/core/detector"
 	"pipeline-cli/scaffolding_engine/core/generator"
 
@@ -16,14 +18,22 @@ var initCmd = &cobra.Command{
 	Short: "Initializes scaffolding for the detected framework",
 	Long:  `Detects the project framework in the current directory and generates scaffolding files and a pipeline.yaml starter.`,
 	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline init"
+		summary.Begin(core.CommandName)
+		ok := true
+		defer func() { summary.GenerateAndFinish(ok) }()
+
 		cwd, err := os.Getwd()
 		if err != nil {
 			fmt.Println("Error getting current directory:", err)
+			ok = false
 			return
 		}
 
 		framework, entryPath := detector.DetectFramework(cwd)
 		fmt.Printf("Detected framework: %s\n", framework)
+		summary.SetMetadata("framework", framework)
+		summary.RecordStage("Framework Detection", summary.StageSuccess, framework)
 
 		var aiResult *detector.AIDetectionResult
 
@@ -54,11 +64,14 @@ var initCmd = &cobra.Command{
 
 			if writeErr := os.WriteFile(yamlPath, []byte(yamlContent), 0644); writeErr != nil {
 				fmt.Printf("\033[33m⚠️  Could not write pipeline.yaml: %v\033[0m\n", writeErr)
+				summary.AddWarning("pipeline.yaml write failed: " + writeErr.Error())
 			} else {
 				fmt.Println("\033[1;32m✓\033[0m Generated starter pipeline.yaml")
+				summary.RecordInfrastructure("pipeline.yaml", "starter config")
 			}
 		} else {
 			fmt.Println("⚠️  pipeline.yaml already exists — skipping (your customizations are preserved)")
+			summary.AddWarning("pipeline.yaml already exists — skipped")
 		}
 	},
 }

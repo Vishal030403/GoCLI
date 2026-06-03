@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"pipeline-cli/core/ai"
+	"pipeline-cli/core/summary"
 )
 
 const prepCICommand = "pipeline prep-ci"
@@ -12,7 +13,12 @@ const prepCICommand = "pipeline prep-ci"
 // exitWithAnalysis prints a fatal preflight error, runs local/Gemini analysis, and exits.
 func exitWithAnalysis(stage, message string) {
 	fmt.Printf("\033[1;31m❌ %s\033[0m\n", message)
+	summary.EnsureSession(prepCICommand)
+	summary.RecordStage(stage, summary.StageFailed, message)
+	summary.MarkRemainingSkipped()
+
 	ctx := ai.BuildFailureContext(prepCICommand, stage, message, 1, message)
 	ai.HandleFailure(ctx)
+	summary.GenerateAfterFailure()
 	os.Exit(1)
 }

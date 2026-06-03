@@ -10,6 +10,7 @@ import (
  
     "pipeline-cli/core"
     "pipeline-cli/core/preflight"
+    "pipeline-cli/core/summary"
  
     "github.com/spf13/cobra"
 )
@@ -19,9 +20,14 @@ var prepCiCmd = &cobra.Command{
     Short: "Spins up an empty ephemeral cluster, registry, and Jenkins sandbox",
 	Run: func(cmd *cobra.Command, args []string) {
 		core.CommandName = "pipeline prep-ci"
+		summary.BeginWithPlan(core.CommandName, []string{
+			"Preflight", "Registry", "Kind Cluster", "Registry Bridge", "Jenkins", "Pipeline Job",
+		})
+		defer summary.GenerateAndFinish(true)
 
 		// 1. RUN PREFLIGHT
         preflight.RunSetupChecks()
+		summary.RecordStage("Preflight", summary.StageSuccess, "")
  
         clusterName := "ephemeral-test"
  
@@ -35,6 +41,8 @@ var prepCiCmd = &cobra.Command{
         appName = strings.ReplaceAll(appName, " ", "-")
  
         // 2. REGISTRY
+		summary.RecordInfrastructure("Registry", "local-registry on 127.0.0.1:5001")
+
         if !isRegistryRunning() {
             fmt.Println("\n\033[33m⚠️ Local registry not running. Waking it up...\033[0m")
  
@@ -55,7 +63,8 @@ var prepCiCmd = &cobra.Command{
                 )
             }
         }
- 
+		summary.RecordStage("Registry", summary.StageSuccess, "")
+
         fmt.Println("\n\033[1;36m🏗️ Building Kubernetes Sandbox & CI/CD Pipeline...\033[0m")
  
         // KIND CONFIG
@@ -90,6 +99,9 @@ containerdConfigPatches:
             false,
             "docker", "network", "connect", "kind", "local-registry",
         )
+		summary.RecordStage("Kind Cluster", summary.StageSuccess, "cluster: "+clusterName)
+		summary.RecordInfrastructure("Kind Cluster", clusterName)
+		summary.RecordStage("Registry Bridge", summary.StageSuccess, "")
  
         fmt.Println("\033[1;36m🔄 Patching Kubeconfig for Jenkins (Native)...\033[0m")
         patchKubeConfig("127.0.0.1", "host.docker.internal")
@@ -114,6 +126,8 @@ jenkins:
         cascFile.WriteString(cascYaml)
         cascFile.Close()
  
+		summary.RecordInfrastructure("Jenkins", "http://localhost:8080 (admin/admin)")
+
         if !isJenkinsRunning() {
  
             fmt.Println("\033[1;36m🚀 Launching Jenkins Server (Automated Setup)...\033[0m")
@@ -221,9 +235,10 @@ jenkins:
                 jenkinsfileBytes, err := os.ReadFile("Jenkinsfile")
  
                 if err != nil {
- 
+
                     fmt.Println("\033[31m⚠️ No Jenkinsfile found in current directory. Cannot auto-create job.\033[0m")
- 
+					summary.RecordStage("Pipeline Job", summary.StageSkipped, "no Jenkinsfile")
+
                 } else {
  
                     scriptContent := fmt.Sprintf("<![CDATA[%s]]>", string(jenkinsfileBytes))
@@ -301,12 +316,16 @@ curl -s -X POST "http://localhost:8080/job/%s/build" \
                     )
  
                     fmt.Println("\033[1;36m🎯 Your code was mounted and the pipeline is building!\033[0m")
+					summary.RecordStage("Pipeline Job", summary.StageSuccess, "job: "+appName)
                 }
+				summary.RecordStage("Jenkins", summary.StageSuccess, "")
             }
  
         } else {
  
             fmt.Printf("\033[1;32m✅ Jenkins '%s' is active.\033[0m\n", jenkinsName)
+			summary.RecordStage("Jenkins", summary.StageSuccess, "already running")
+			summary.RecordStage("Pipeline Job", summary.StageSkipped, "jenkins already active")
         }
  
         fmt.Println("\n\033[1;32m✅ CI/CD Sandbox is LIVE and Ready!\033[0m")
@@ -320,6 +339,9 @@ var destroyCiCmd = &cobra.Command{
 	Use:   "destroy-ci",
 	Short: "Completely destroys the local CI/CD sandbox and optional scaffolding files",
 	Run: func(cmd *cobra.Command, args []string) {
+		core.CommandName = "pipeline destroy-ci"
+		summary.Begin(core.CommandName)
+		defer summary.GenerateAndFinish(true)
 
 		clusterName := "ephemeral-test"
 
@@ -356,6 +378,7 @@ var destroyCiCmd = &cobra.Command{
 		patchKubeConfig("host.docker.internal", "127.0.0.1")
 
 		fmt.Println("\n\033[1;32m🧹 Infrastructure destroyed safely.\033[0m")
+		summary.RecordInfrastructure("Cleanup", "Removed Jenkins, registry, Kind cluster "+clusterName)
 
 		// --- NEW LOGIC: Interactive Scaffolding Cleanup ---
 		fmt.Println("\n\033[1;33m⚠️  Do you also want to delete the generated scaffolding files from this project?\033[0m")

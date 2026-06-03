@@ -12,6 +12,7 @@ import (
 
 	"pipeline-cli/core"
 	"pipeline-cli/core/ai"
+	"pipeline-cli/core/summary"
 
 	"github.com/spf13/cobra"
 )
@@ -21,6 +22,7 @@ var tunnelCmd = &cobra.Command{
 	Short: "Opens a secure port-forward tunnel to your deployed application",
 	Run: func(cmd *cobra.Command, args []string) {
 		core.CommandName = "pipeline tunnel"
+		summary.Begin(core.CommandName)
 		cwd, _ := os.Getwd()
 		rawName := filepath.Base(cwd)
 		appName := strings.ToLower(rawName)
@@ -31,6 +33,8 @@ var tunnelCmd = &cobra.Command{
 		appName = strings.Trim(appName, "-")
 
 		namespace := appName + "-ns"
+		summary.RecordInfrastructure("Tunnel", fmt.Sprintf("svc/%s in %s → http://localhost:8081", appName, namespace))
+		summary.SetMetadata("app", appName)
 
 		fmt.Println("\033[1;36m🔄 Patching Kubeconfig for Local Terminal (Native)...\033[0m")
 		patchKubeConfig("host.docker.internal", "127.0.0.1")
@@ -44,6 +48,8 @@ var tunnelCmd = &cobra.Command{
 		go func() {
 			<-sigChan
 			fmt.Println("\n\033[1;36m🚪 Port-forwarding stopped.\033[0m")
+			summary.RecordStage("Port Forward", summary.StageSuccess, "stopped by user")
+			summary.GenerateAndFinish(true)
 			os.Exit(0)
 		}()
 
@@ -53,6 +59,8 @@ var tunnelCmd = &cobra.Command{
 		c.Stderr = stderr
 		c.Stdin = os.Stdin
 
+		summary.RecordStage("Port Forward", summary.StageSuccess, "tunnel active")
+
 		err := c.Run()
 		if err != nil {
 			fmt.Println("\n\033[31m❌ Tunnel disconnected or failed to start.\033[0m")
@@ -60,6 +68,7 @@ var tunnelCmd = &cobra.Command{
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode = exitErr.ExitCode()
 			}
+			summary.RecordStage("Port Forward", summary.StageFailed, err.Error())
 			ctx := ai.BuildFailureContext(
 				"pipeline tunnel",
 				"Port Forward",
@@ -68,7 +77,10 @@ var tunnelCmd = &cobra.Command{
 				buf.Text(),
 			)
 			ai.HandleFailure(ctx)
+			summary.GenerateAfterFailure()
+			os.Exit(1)
 		}
+		summary.GenerateAndFinish(true)
 	},
 }
 

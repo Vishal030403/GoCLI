@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"pipeline-cli/core/ai"
+	"pipeline-cli/core/summary"
 )
 
 // AnalyzeProject returns a map indicating project characteristics
@@ -33,6 +34,7 @@ func ExecSilent(executable string, args ...string) error {
 // ExecCommand executes a native OS command without needing a bash wrapper.
 // On critical failure, AI analysis runs before exit. Success paths never call AI.
 func ExecCommand(stepName string, ignoreErrors bool, liveOutput bool, executable string, args ...string) {
+	summary.EnsureSession(activeCommand())
 	fmt.Printf("\n\033[1;36m▶ Running: %s...\033[0m\n", stepName)
 
 	cmd := exec.Command(executable, args...)
@@ -55,6 +57,11 @@ func ExecCommand(stepName string, ignoreErrors bool, liveOutput bool, executable
 	}
 
 	fmt.Printf("\033[32m✅ %s completed perfectly!\033[0m\n", stepName)
+	if ignoreErrors {
+		summary.RecordStage(stepName, summary.StageWarning, "")
+	} else {
+		summary.RecordStage(stepName, summary.StageSuccess, "")
+	}
 }
 
 func handleError(err error, stepName string, ignoreErrors bool, output string) {
@@ -72,12 +79,18 @@ func handleError(err error, stepName string, ignoreErrors bool, output string) {
 			exitCode = exitErr.ExitCode()
 		}
 
+		summary.EnsureSession(activeCommand())
+		summary.RecordStage(stepName, summary.StageFailed, err.Error())
+		summary.MarkRemainingSkipped()
+
 		ctx := ai.BuildFailureContext(activeCommand(), stepName, err.Error(), exitCode, output)
 		ai.HandleFailure(ctx)
+		summary.GenerateAfterFailure()
 		os.Exit(1)
 	}
 
 	fmt.Printf("\033[33m⚠️ %s found issues (Ignored):\033[0m\n", stepName)
+	summary.RecordStage(stepName, summary.StageWarning, err.Error())
 	if output != "" {
 		fmt.Print(output)
 	}
