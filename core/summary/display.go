@@ -12,16 +12,16 @@ func terminalSections(layout templateLayout, success bool) []sectionID {
 	return layout.terminalFailure
 }
 
-// PrintSummary renders the executive terminal summary using command-specific templates.
+// PrintSummary renders a compact terminal summary.
 func PrintSummary(state ExecutionState, report SummaryReport) {
+	report = compactForTerminal(report)
 	layout := layoutFor(state)
 	ids := terminalSections(layout, state.Success)
 
 	fmt.Println()
-	fmt.Println("\033[90m────────────────────────────────────────────────────────\033[0m")
+	fmt.Println("\033[90m────────────────────────────\033[0m")
 	fmt.Println("\033[1;36m🤖 AI Summary\033[0m")
-	fmt.Println("\033[90m────────────────────────────────────────────────────────\033[0m")
-	fmt.Println()
+	fmt.Println("\033[90m────────────────────────────\033[0m")
 
 	for _, id := range ids {
 		body := sectionBody(id, report)
@@ -31,45 +31,23 @@ func PrintSummary(state ExecutionState, report SummaryReport) {
 		printSection(sectionTitle(id), body)
 	}
 
-	fmt.Println("\033[90m────────────────────────────────────────────────────────\033[0m")
-	fmt.Println()
+	fmt.Println("\033[90m────────────────────────────\033[0m")
 }
 
 func printSection(title, body string) {
-	body = stringsTrim(body)
+	body = strings.TrimSpace(body)
 	if body == "" {
 		return
 	}
-	fmt.Printf("\033[1m%s\033[0m\n", title)
-	fmt.Printf("   %s\n\n", indentBody(body))
-}
-
-func indentBody(body string) string {
-	lines := splitLines(body)
-	if len(lines) <= 1 {
-		return body
+	if !strings.Contains(body, "\n") {
+		fmt.Printf("  \033[1m%s:\033[0m %s\n", title, body)
+		return
 	}
-	var out string
-	for i, line := range lines {
-		if i > 0 {
-			out += "\n   "
-		}
-		out += line
-	}
-	return out
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
+	fmt.Printf("  \033[1m%s:\033[0m\n", title)
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			fmt.Printf("     %s\n", line)
 		}
 	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
 }

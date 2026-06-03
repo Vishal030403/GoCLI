@@ -10,61 +10,39 @@ func buildMarkdown(state ExecutionState, r SummaryReport) string {
 	layout := layoutFor(state)
 	ids := layout.markdownExtra
 	if state.Success {
-		ids = append(terminalSections(layout, true), layout.markdownExtra...)
+		ids = append(terminalSections(layout, true), ids...)
 	} else {
-		ids = append(terminalSections(layout, false), layout.markdownExtra...)
+		ids = append(terminalSections(layout, false), ids...)
 	}
 
 	var b strings.Builder
 	b.WriteString("# AI Execution Summary\n\n")
-	b.WriteString(fmt.Sprintf("**Generated:** %s\n\n", time.Now().Format(time.RFC3339)))
-	b.WriteString("**Command:** " + state.Command + "\n\n")
-	b.WriteString("**Duration:** " + formatDuration(state) + "\n\n")
+	b.WriteString(fmt.Sprintf("**When:** %s  \n", time.Now().Format("2006-01-02 15:04:05")))
+	b.WriteString(fmt.Sprintf("**Command:** %s  \n", state.Command))
+	b.WriteString(fmt.Sprintf("**Result:** %s  \n\n", buildExecutionResult(state)))
 
 	seen := map[sectionID]bool{}
-	all := append([]sectionID{secResult}, ids...)
-	for _, id := range all {
-		if seen[id] {
+	for _, id := range append([]sectionID{secStages}, ids...) {
+		if seen[id] || id == secResult {
 			continue
 		}
 		seen[id] = true
 		body := sectionBody(id, r)
-		if id == secResult {
-			body = r.ExecutionResult
+		if id == secStages && body == "" {
+			body = formatStagesBrief(state)
 		}
 		writeMDSection(&b, sectionTitle(id), body)
 	}
 
-	if warningStageCount(state) > 0 {
-		var w strings.Builder
-		for _, msg := range state.Warnings {
-			w.WriteString("- " + msg + "\n")
-		}
-		for _, s := range state.Stages {
-			if s.Status == StageWarning {
-				fmt.Fprintf(&w, "- %s\n", displayStageName(s.Name))
-			}
-		}
-		writeMDSection(&b, "Warnings", strings.TrimSpace(w.String()))
+	if warningStageCount(state) > 0 && len(state.Warnings) > 0 {
+		writeMDSection(&b, "Warnings", strings.Join(state.Warnings, "\n"))
 	}
 
-	if len(state.Errors) > 0 {
-		var e strings.Builder
-		for _, msg := range state.Errors {
-			e.WriteString("- " + msg + "\n")
-		}
-		writeMDSection(&b, "Failures", strings.TrimSpace(e.String()))
-	}
-
-	if r.DeveloperNotes != "" {
-		writeMDSection(&b, "Developer Notes", r.DeveloperNotes)
-	}
-
-	return b.String()
+	return strings.TrimSpace(b.String()) + "\n"
 }
 
 func writeMDSection(b *strings.Builder, title, body string) {
-	body = strings.TrimSpace(body)
+	body = strings.TrimSpace(clampLines(body, 12))
 	if body == "" {
 		return
 	}

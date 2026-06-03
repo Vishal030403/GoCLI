@@ -1,34 +1,33 @@
 package summary
 
-// sectionID identifies a summary block.
 type sectionID string
 
 const (
-	secResult           sectionID = "execution_result"
-	secOverview         sectionID = "execution_overview"
-	secInfra            sectionID = "infrastructure"
-	secValidation       sectionID = "validation"
-	secStages           sectionID = "pipeline_stages"
-	secOutcome          sectionID = "pipeline_outcome"
-	secLearnings        sectionID = "key_learnings"
-	secRecommendations  sectionID = "recommendations"
-	secSuccessStages    sectionID = "successful_stages"
-	secFailed           sectionID = "failed_stage"
-	secSkipped          sectionID = "skipped_stages"
-	secInfraState       sectionID = "infrastructure_state"
-	secRecovery         sectionID = "recovery"
-	secProjectDetect    sectionID = "project_detection"
-	secGeneratedFiles   sectionID = "generated_files"
-	secNextSteps        sectionID = "next_steps"
-	secTunnelOverview   sectionID = "tunnel_overview"
-	secTunnelMetrics    sectionID = "tunnel_metrics"
-	secSessionOutcome   sectionID = "session_outcome"
-	secCleanup          sectionID = "cleanup_overview"
+	secResult          sectionID = "execution_result"
+	secOverview        sectionID = "execution_overview"
+	secInfra           sectionID = "infrastructure"
+	secValidation      sectionID = "validation"
+	secStages          sectionID = "pipeline_stages"
+	secOutcome         sectionID = "pipeline_outcome"
+	secLearnings       sectionID = "key_learnings"
+	secRecommendations sectionID = "recommendations"
+	secSuccessStages   sectionID = "successful_stages"
+	secFailed          sectionID = "failed_stage"
+	secSkipped         sectionID = "skipped_stages"
+	secInfraState      sectionID = "infrastructure_state"
+	secRecovery        sectionID = "recovery"
+	secProjectDetect   sectionID = "project_detection"
+	secGeneratedFiles  sectionID = "generated_files"
+	secNextSteps       sectionID = "next_steps"
+	secTunnelOverview  sectionID = "tunnel_overview"
+	secTunnelMetrics   sectionID = "tunnel_metrics"
+	secSessionOutcome  sectionID = "session_outcome"
+	secCleanup         sectionID = "cleanup_overview"
 	secResourcesRemoved sectionID = "resources_removed"
-	secCluster          sectionID = "cluster_status"
-	secRegistry         sectionID = "registry_status"
-	secJenkins          sectionID = "jenkins_status"
-	secEnvironment      sectionID = "environment_state"
+	secCluster         sectionID = "cluster_status"
+	secRegistry        sectionID = "registry_status"
+	secJenkins         sectionID = "jenkins_status"
+	secEnvironment     sectionID = "environment_state"
 )
 
 type templateLayout struct {
@@ -39,24 +38,24 @@ type templateLayout struct {
 
 var commandTemplates = map[string]templateLayout{
 	"init": {
-		terminalSuccess: []sectionID{secResult, secOverview, secValidation, secProjectDetect, secGeneratedFiles, secNextSteps},
-		terminalFailure: []sectionID{secResult, secSuccessStages, secFailed, secSkipped, secRecovery, secRecommendations},
-		markdownExtra:   []sectionID{secStages, secLearnings, secOutcome},
+		terminalSuccess: []sectionID{secResult, secOverview, secNextSteps},
+		terminalFailure: []sectionID{secResult, secFailed, secRecovery},
+		markdownExtra:   []sectionID{secStages, secGeneratedFiles, secLearnings},
 	},
 	"prep-ci": {
-		terminalSuccess: []sectionID{secResult, secOverview, secInfra, secOutcome, secLearnings, secRecommendations},
-		terminalFailure: []sectionID{secResult, secSuccessStages, secFailed, secSkipped, secInfraState, secRecovery, secRecommendations},
-		markdownExtra:   []sectionID{secValidation, secStages, secOutcome},
+		terminalSuccess: []sectionID{secResult, secOutcome, secInfra, secRecommendations},
+		terminalFailure: []sectionID{secResult, secFailed, secSkipped, secRecovery},
+		markdownExtra:   []sectionID{secStages, secValidation, secLearnings},
 	},
 	"tunnel": {
-		terminalSuccess: []sectionID{secResult, secTunnelOverview, secTunnelMetrics, secSessionOutcome, secLearnings, secRecommendations},
-		terminalFailure: []sectionID{secResult, secTunnelOverview, secTunnelMetrics, secFailed, secRecovery, secRecommendations},
-		markdownExtra:   []sectionID{secOverview, secStages},
+		terminalSuccess: []sectionID{secResult, secTunnelMetrics, secRecommendations},
+		terminalFailure: []sectionID{secResult, secFailed, secRecovery},
+		markdownExtra:   []sectionID{secTunnelOverview, secSessionOutcome},
 	},
 	"destroy-ci": {
-		terminalSuccess: []sectionID{secResult, secCleanup, secResourcesRemoved, secEnvironment, secRecommendations},
-		terminalFailure: []sectionID{secResult, secCleanup, secFailed, secRecovery, secRecommendations},
-		markdownExtra:   []sectionID{secCluster, secRegistry, secJenkins, secStages, secLearnings},
+		terminalSuccess: []sectionID{secResult, secCleanup, secRecommendations},
+		terminalFailure: []sectionID{secResult, secFailed, secRecovery},
+		markdownExtra:   []sectionID{secResourcesRemoved, secEnvironment},
 	},
 }
 
@@ -66,64 +65,58 @@ func layoutFor(state ExecutionState) templateLayout {
 		return t
 	}
 	return templateLayout{
-		terminalSuccess: []sectionID{secResult, secOverview, secInfra, secOutcome, secLearnings, secRecommendations},
-		terminalFailure: []sectionID{secResult, secSuccessStages, secFailed, secSkipped, secRecovery, secRecommendations},
-		markdownExtra:   []sectionID{secValidation, secStages},
+		terminalSuccess: []sectionID{secResult, secOutcome, secRecommendations},
+		terminalFailure: []sectionID{secResult, secFailed, secRecovery},
+		markdownExtra:   []sectionID{secStages},
 	}
 }
 
 func sectionTitle(id sectionID) string {
 	switch id {
 	case secResult:
-		return "Execution Result"
+		return "Result"
 	case secOverview:
-		return "Execution Overview"
+		return "Overview"
 	case secInfra:
-		return "Infrastructure Created"
+		return "Infrastructure"
 	case secValidation:
-		return "Validation Results"
+		return "Validation"
 	case secStages:
-		return "Pipeline Flow"
+		return "Stages"
 	case secOutcome:
-		return "Pipeline Outcome"
+		return "Outcome"
 	case secLearnings:
-		return "Key Learnings"
+		return "Learnings"
 	case secRecommendations:
-		return "Recommendations"
+		return "Next"
 	case secSuccessStages:
-		return "Successful Stages"
+		return "Completed"
 	case secFailed:
-		return "Failed Stage"
+		return "Failed"
 	case secSkipped:
-		return "Skipped Stages"
+		return "Skipped"
 	case secInfraState:
-		return "Infrastructure State"
+		return "Infra State"
 	case secRecovery:
-		return "Recovery Recommendations"
+		return "Recovery"
 	case secProjectDetect:
-		return "Project Detection"
+		return "Framework"
 	case secGeneratedFiles:
-		return "Generated Files"
+		return "Files"
 	case secNextSteps:
-		return "Developer Next Steps"
+		return "Next"
 	case secTunnelOverview:
-		return "Tunnel Overview"
+		return "Tunnel"
 	case secTunnelMetrics:
-		return "Tunnel Session"
+		return "Tunnel"
 	case secSessionOutcome:
-		return "Session Outcome"
+		return "Session"
 	case secCleanup:
-		return "Cleanup Overview"
+		return "Cleanup"
 	case secResourcesRemoved:
-		return "Resources Removed"
-	case secCluster:
-		return "Cluster Status"
-	case secRegistry:
-		return "Registry Status"
-	case secJenkins:
-		return "Jenkins Status"
+		return "Removed"
 	case secEnvironment:
-		return "Environment State"
+		return "Environment"
 	default:
 		return string(id)
 	}

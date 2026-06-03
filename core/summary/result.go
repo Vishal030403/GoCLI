@@ -11,24 +11,25 @@ func buildExecutionResult(state ExecutionState) string {
 	if !state.Success {
 		status = "FAILED"
 	}
-	dur := formatDuration(state)
+	errors := errorCount(state)
 	warnings := warningStageCount(state)
-	errors := len(state.Errors)
+
+	line := fmt.Sprintf("%s · %s · warnings:%d · errors:%d",
+		status, formatDuration(state), warnings, errors)
+	if !state.Success && state.FailedStage != "" {
+		line += " · failed:" + displayStageName(state.FailedStage)
+	}
+	return line
+}
+
+func errorCount(state ExecutionState) int {
+	n := len(state.Errors)
 	for _, s := range state.Stages {
 		if s.Status == StageFailed {
-			errors++
+			n++
 		}
 	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "Status: %s\n", status)
-	fmt.Fprintf(&b, "Duration: %s\n", dur)
-	fmt.Fprintf(&b, "Warnings: %d\n", warnings)
-	fmt.Fprintf(&b, "Errors: %d", errors)
-	if !state.Success && state.FailedStage != "" {
-		b.WriteString("\nFailed Stage: " + displayStageName(state.FailedStage))
-	}
-	return b.String()
+	return n
 }
 
 func formatDuration(state ExecutionState) string {
@@ -43,7 +44,7 @@ func formatDuration(state ExecutionState) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
-	return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
+	return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 func formatTunnelMetrics(state ExecutionState) string {
@@ -55,15 +56,24 @@ func formatTunnelMetrics(state ExecutionState) string {
 	if t.Duration > 0 {
 		dur = t.Duration.Round(time.Second).String()
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Application: %s\n", t.AppName)
-	fmt.Fprintf(&b, "Namespace: %s\n", t.Namespace)
-	fmt.Fprintf(&b, "Local Port: %s\n", t.LocalPort)
-	fmt.Fprintf(&b, "Pod/Service Port: %s\n", t.TargetPort)
-	fmt.Fprintf(&b, "Duration: %s\n", dur)
-	fmt.Fprintf(&b, "Requests Forwarded: %d\n", t.RequestsForwarded)
-	if t.Outcome != "" {
-		fmt.Fprintf(&b, "Session Outcome: %s", t.Outcome)
+	outcome := t.Outcome
+	if outcome == "" {
+		outcome = "ended"
 	}
-	return strings.TrimSpace(b.String())
+	return fmt.Sprintf("%s/%s · localhost:%s→%s · %s · %d requests · %s",
+		t.AppName, t.Namespace, t.LocalPort, t.TargetPort, dur, t.RequestsForwarded, outcome)
+}
+
+func formatInfrastructureBrief(state ExecutionState) string {
+	if len(state.Infrastructure) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(state.Infrastructure))
+	for i, item := range state.Infrastructure {
+		if i >= 4 {
+			break
+		}
+		parts = append(parts, item.Name)
+	}
+	return strings.Join(parts, ", ")
 }

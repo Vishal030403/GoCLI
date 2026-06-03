@@ -44,7 +44,7 @@ func generateReport(state ExecutionState) SummaryReport {
 	go func() {
 		r, err := generateWithGemini(state)
 		if err == nil && r.hasContent() {
-			ch <- sanitizeReport(state, r)
+			ch <- sanitizeReport(state, compactForTerminal(r))
 			return
 		}
 		ch <- SummaryReport{}
@@ -55,15 +55,15 @@ func generateReport(state ExecutionState) SummaryReport {
 		if r.hasContent() {
 			r.ExecutionResult = buildExecutionResult(state)
 			if r.PipelineStages == "" {
-				r.PipelineStages = formatStagesConcise(state)
+				r.PipelineStages = formatStagesBrief(state)
 			}
 			r.RawMarkdown = buildMarkdown(state, r)
 			return r
 		}
-	case <-time.After(25 * time.Second):
+	case <-time.After(20 * time.Second):
 	}
 
-	report = sanitizeReport(state, report)
+	report = sanitizeReport(state, compactForTerminal(report))
 	report.RawMarkdown = buildMarkdown(state, report)
 	return report
 }
@@ -82,7 +82,7 @@ func generateWithGemini(state ExecutionState) (SummaryReport, error) {
 		return empty, err
 	}
 
-	userMsg := fmt.Sprintf("Generate a command-aware summary from this structured execution data ONLY:\n\n%s", string(payload))
+	userMsg := fmt.Sprintf("Brief summary. JSON data only:\n%s", string(payload))
 
 	text, err := client.Complete(geminiSystemPrompt, userMsg)
 	if err != nil {
@@ -100,6 +100,10 @@ func generateWithGemini(state ExecutionState) (SummaryReport, error) {
 		return empty, err
 	}
 
+	return rawToReport(raw), nil
+}
+
+func rawToReport(raw geminiSummaryRaw) SummaryReport {
 	return SummaryReport{
 		ExecutionOverview:   raw.ExecutionOverview,
 		Infrastructure:      raw.Infrastructure,
@@ -126,21 +130,18 @@ func generateWithGemini(state ExecutionState) (SummaryReport, error) {
 		JenkinsStatus:       raw.JenkinsStatus,
 		EnvironmentState:    raw.EnvironmentState,
 		DeveloperNotes:      raw.DeveloperNotes,
-	}, nil
+	}
 }
 
 func generateFallback(state ExecutionState) SummaryReport {
-	cmd := commandShort(state.Command)
-	stages := formatStagesConcise(state)
-	result := buildExecutionResult(state)
-
+	stages := formatStagesBrief(state)
 	r := SummaryReport{
-		ExecutionResult:  result,
+		ExecutionResult:  buildExecutionResult(state),
 		PipelineStages:   stages,
 		ProjectDetection: state.Metadata["framework"],
 	}
 
-	switch cmd {
+	switch commandShort(state.Command) {
 	case "init":
 		r = buildInitFallback(state, r)
 	case "prep-ci":
@@ -154,123 +155,69 @@ func generateFallback(state ExecutionState) SummaryReport {
 	}
 
 	if !state.Success {
-		r.SuccessfulStages = strings.Join(SuccessfulStageNames(state), ", ")
-		r.SkippedStages = strings.Join(SkippedStageNames(state), ", ")
+		ok := SuccessfulStageNames(state)
+		if len(ok) > 0 {
+			r.SuccessfulStages = strings.Join(ok, ", ")
+		}
+		skip := SkippedStageNames(state)
+		if len(skip) > 0 {
+			r.SkippedStages = strings.Join(skip, ", ")
+		}
 		if state.FailedStage != "" {
 			r.FailedStage = displayStageName(state.FailedStage)
 		}
 		r.RecoverySteps = fallbackRecovery(state)
-		r.InfrastructureState = r.Infrastructure
 	}
 
 	return r
 }
 
 func buildInitFallback(state ExecutionState, r SummaryReport) SummaryReport {
-	r.ExecutionOverview = fmt.Sprintf("Initialized project scaffolding for **%s**.", state.Metadata["framework"])
-	r.ValidationResults = "Framework detection and file generation completed."
-	r.GeneratedFiles = "Dockerfile, Jenkinsfile, k8s manifests, pipeline.yaml (if new)"
-	r.NextSteps = "Run `pipeline prep-ci` to provision local CI/CD, then push a build through Jenkins."
-	r.KeyLearnings = fallbackLearnings(state)
-	r.Recommendations = fallbackRecommendations(state)
-	r.PipelineOutcome = "Scaffolding ready for local pipeline."
+	fw := state.Metadata["framework"]
+	r.ExecutionOverview = fmt.Sprintf("Scaffolding ready (%s).", fw)
+	r.GeneratedFiles = "Dockerfile, Jenkinsfile, k8s/, pipeline.yaml"
+	r.NextSteps = "Run: pipeline prep-ci"
+	r.PipelineOutcome = "Init complete"
 	return r
 }
 
 func buildPrepCIFallback(state ExecutionState, r SummaryReport) SummaryReport {
-	r.ExecutionOverview = "Local CI/CD sandbox is provisioned and ready for builds."
-	r.Infrastructure = formatInfrastructure(state)
-	r.ValidationResults = "Preflight checks passed: Docker, Kind, kubectl, ports 5001/8080."
-	r.PipelineOutcome = "Sandbox live — Jenkins, registry, and Kind cluster operational."
-	r.KeyLearnings = fallbackLearnings(state)
-	r.Recommendations = fallbackRecommendations(state)
+	r.ExecutionOverview = "Sandbox ready."
+	r.Infrastructure = formatInfrastructureBrief(state)
+	r.ValidationResults = "Docker, Kind, kubectl, ports OK"
+	r.PipelineOutcome = "Jenkins + registry + Kind cluster up"
+	r.Recommendations = "Jenkins :8080 → pipeline tunnel"
 	return r
 }
 
 func buildTunnelFallback(state ExecutionState, r SummaryReport) SummaryReport {
-	if state.Tunnel != nil {
-		t := state.Tunnel
-		r.TunnelOverview = fmt.Sprintf("Port-forward from **localhost:%s** to service **%s** in namespace **%s**.",
-			t.LocalPort, t.AppName, t.Namespace)
-		r.TunnelMetrics = formatTunnelMetrics(state)
-		r.SessionOutcome = t.Outcome
-		if r.SessionOutcome == "" {
-			r.SessionOutcome = "Session ended"
-		}
-	}
-	r.KeyLearnings = fallbackLearnings(state)
-	r.Recommendations = fallbackRecommendations(state)
-	r.PipelineOutcome = r.SessionOutcome
+	r.TunnelMetrics = formatTunnelMetrics(state)
+	r.TunnelOverview = r.TunnelMetrics
+	r.SessionOutcome = r.TunnelMetrics
+	r.PipelineOutcome = "Tunnel closed"
+	r.Recommendations = "http://localhost:8081 when tunnel is open"
 	return r
 }
 
 func buildDestroyCIFallback(state ExecutionState, r SummaryReport) SummaryReport {
-	r.CleanupOverview = "Tore down local CI/CD sandbox resources."
-	r.ResourcesRemoved = formatInfrastructure(state)
-	r.ClusterStatus = "Kind cluster ephemeral-test removed"
-	r.RegistryStatus = "local-registry container and volume removed"
-	r.JenkinsStatus = "local-jenkins container and volume removed"
-	r.EnvironmentState = "Ports 5001 and 8080 freed; kubeconfig restored"
-	r.Recommendations = "Run `pipeline prep-ci` when you need a fresh sandbox."
+	r.CleanupOverview = "Sandbox torn down."
+	r.ResourcesRemoved = formatInfrastructureBrief(state)
+	r.EnvironmentState = "Ports freed, kubeconfig restored"
+	r.Recommendations = "pipeline prep-ci for a fresh sandbox"
 	return r
 }
 
 func buildGenericFallback(state ExecutionState, r SummaryReport) SummaryReport {
-	r.ExecutionOverview = fmt.Sprintf("Completed **%s**.", commandShort(state.Command))
-	r.Infrastructure = formatInfrastructure(state)
-	r.PipelineOutcome = "Done"
-	r.KeyLearnings = fallbackLearnings(state)
-	r.Recommendations = fallbackRecommendations(state)
+	r.ExecutionOverview = commandShort(state.Command) + " done"
+	r.PipelineOutcome = "Complete"
 	return r
 }
 
-func formatInfrastructure(state ExecutionState) string {
-	if len(state.Infrastructure) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, item := range state.Infrastructure {
-		fmt.Fprintf(&b, "• %s — %s\n", item.Name, item.Detail)
-	}
-	return strings.TrimSpace(b.String())
-}
-
-func fallbackLearnings(state ExecutionState) string {
-	switch commandShort(state.Command) {
-	case "prep-ci":
-		return "A local Kind cluster plus registry and Jenkins mirrors a minimal cloud pipeline on your laptop."
-	case "init":
-		return "Scaffolding tells the pipeline how to build, test, and deploy your app without manual DevOps setup."
-	case "tunnel":
-		return "Port-forward exposes in-cluster services on localhost so you can test without public ingress."
-	case "destroy-ci":
-		return "Cleanup removes containers, volumes, and clusters so ports and disk space are freed."
-	default:
-		return "This CLI runs CI/CD locally with Docker and Kubernetes (Kind)."
-	}
-}
-
-func fallbackRecommendations(state ExecutionState) string {
-	if !state.Success {
-		return "Resolve the failed stage, then re-run the command. Ensure Docker is running and ports 5001/8080 are free."
-	}
-	switch commandShort(state.Command) {
-	case "prep-ci":
-		return "Open Jenkins (http://localhost:8080), verify the pipeline build, then `pipeline tunnel` to reach the app."
-	case "tunnel":
-		return "Use http://localhost:8081 while the tunnel is active."
-	case "init":
-		return "Commit generated files, then run `pipeline prep-ci`."
-	default:
-		return "Keep pipeline.yaml in version control for repeatable builds."
-	}
-}
-
 func fallbackRecovery(state ExecutionState) string {
-	return fmt.Sprintf("1. Review AI Analysis above.\n2. Fix the issue at stage: %s.\n3. Re-run: pipeline %s",
+	return fmt.Sprintf("Fix %s, then: pipeline %s",
 		displayStageName(state.FailedStage), commandShort(state.Command))
 }
 
 func (r SummaryReport) hasContent() bool {
-	return r.ExecutionOverview != "" || r.TunnelOverview != "" || r.CleanupOverview != ""
+	return r.ExecutionOverview != "" || r.TunnelMetrics != "" || r.CleanupOverview != ""
 }

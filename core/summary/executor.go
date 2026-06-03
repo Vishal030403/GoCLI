@@ -9,13 +9,12 @@ import (
 
 const markdownFile = "ai-summary.md"
 
-// GenerateExecutionSummary builds, displays, and persists the summary (best-effort, never panics).
+// GenerateExecutionSummary builds, displays, and persists the summary (best-effort).
 func GenerateExecutionSummary(state ExecutionState) {
 	defer func() { recover() }()
 
 	mu.Lock()
 	once := &summaryOnce
-	done := summaryDone
 	mu.Unlock()
 
 	once.Do(func() {
@@ -23,11 +22,11 @@ func GenerateExecutionSummary(state ExecutionState) {
 			state.Command = lastCommandName
 		}
 		if state.Command == "" {
+			writeMarkdownFile(minimalMarkdown("unknown"))
 			return
 		}
 
-		fmt.Println()
-		fmt.Println("\033[1;36m🤖 Generating AI Summary...\033[0m")
+		fmt.Println("\n\033[1;36m🤖 AI Summary\033[0m")
 
 		report := generateReport(state)
 		PrintSummary(state, report)
@@ -43,24 +42,25 @@ func GenerateExecutionSummary(state ExecutionState) {
 		mu.Unlock()
 
 		if path != "" {
-			fmt.Printf("\033[90m   Summary saved to %s\033[0m\n", path)
+			fmt.Printf("\033[90m  → %s\033[0m\n", path)
 		}
-		fmt.Println()
 	})
+}
 
-	_ = done
+func minimalMarkdown(cmd string) string {
+	return "# AI Execution Summary\n\n**Command:** " + cmd + "\n\n**When:** " +
+		time.Now().Format("2006-01-02 15:04:05") + "\n\n_No summary content._\n"
 }
 
 func writeMarkdownFile(content string) string {
 	if content == "" {
-		content = "# AI Execution Summary\n\n**Generated:** " + time.Now().Format(time.RFC3339) + "\n\n_No summary content generated._\n"
+		content = minimalMarkdown(lastCommandName)
 	}
 	cwd, err := os.Getwd()
-	if err != nil {
-		_ = os.WriteFile(markdownFile, []byte(content), 0644)
-		return markdownFile
+	path := markdownFile
+	if err == nil {
+		path = filepath.Join(cwd, markdownFile)
 	}
-	path := filepath.Join(cwd, markdownFile)
 	_ = os.WriteFile(path, []byte(content), 0644)
 	return path
 }
@@ -71,7 +71,7 @@ func GenerateAndFinish(success bool) {
 	GenerateExecutionSummary(state)
 }
 
-// FlushPending runs summary if a session is still open (cobra PostRun safety net).
+// FlushPending runs summary if a session is still open.
 func FlushPending() {
 	mu.Lock()
 	if summaryDone || session == nil {

@@ -32,16 +32,36 @@ func TestSanitizeReport_StripsWarningsWhenZero(t *testing.T) {
 	}
 }
 
-func TestFormatStagesConcise(t *testing.T) {
+func TestFormatStagesBrief(t *testing.T) {
 	state := ExecutionState{
+		Command: "pipeline prep-ci",
 		Stages: []StageRecord{
 			{Name: "Preflight", Status: StageSuccess},
 			{Name: "Registry", Status: StageSuccess},
 		},
 	}
-	s := formatStagesConcise(state)
+	s := formatStagesBrief(state)
 	if !strings.Contains(s, "✓") {
 		t.Fatalf("expected checkmarks: %q", s)
+	}
+}
+
+func TestFormatStagesBrief_PrepCI_HidesGranular(t *testing.T) {
+	state := ExecutionState{
+		Command: "pipeline prep-ci",
+		Stages: []StageRecord{
+			{Name: "Preflight", Status: StageSuccess},
+			{Name: "Registry", Status: StageSuccess},
+			{Name: "Installing Docker CLI inside Jenkins", Status: StageSuccess},
+			{Name: "Jenkins", Status: StageSuccess},
+		},
+	}
+	s := formatStagesBrief(state)
+	if strings.Contains(s, "Installing Docker") {
+		t.Fatalf("granular step should be hidden: %q", s)
+	}
+	if !strings.Contains(s, "Jenkins") {
+		t.Fatalf("expected Jenkins in brief stages: %q", s)
 	}
 }
 
