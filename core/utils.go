@@ -57,11 +57,8 @@ func ExecCommand(stepName string, ignoreErrors bool, liveOutput bool, executable
 	}
 
 	fmt.Printf("\033[32m✅ %s completed perfectly!\033[0m\n", stepName)
-	if ignoreErrors {
-		summary.RecordStage(stepName, summary.StageWarning, "")
-	} else {
-		summary.RecordStage(stepName, summary.StageSuccess, "")
-	}
+	// ignoreErrors means non-fatal steps still completed successfully — not a warning.
+	summary.RecordStage(stepName, summary.StageSuccess, "")
 }
 
 func handleError(err error, stepName string, ignoreErrors bool, output string) {
@@ -80,6 +77,7 @@ func handleError(err error, stepName string, ignoreErrors bool, output string) {
 		}
 
 		summary.EnsureSession(activeCommand())
+		summary.MarkFailed()
 		summary.RecordStage(stepName, summary.StageFailed, err.Error())
 		summary.MarkRemainingSkipped()
 

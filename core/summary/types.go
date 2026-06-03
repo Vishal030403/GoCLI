@@ -12,6 +12,19 @@ const (
 	StageWarning StageStatus = "WARNING"
 )
 
+// TunnelSummary holds port-forward session metrics.
+type TunnelSummary struct {
+	AppName           string
+	Namespace         string
+	LocalPort         string
+	TargetPort        string
+	StartTime         time.Time
+	EndTime           time.Time
+	Duration          time.Duration
+	RequestsForwarded int
+	Outcome           string
+}
+
 // ExecutionState is structured runtime data for summary generation.
 type ExecutionState struct {
 	Command        string
@@ -25,6 +38,7 @@ type ExecutionState struct {
 	Errors         []string
 	Infrastructure []InfrastructureItem
 	Metadata       map[string]string
+	Tunnel         *TunnelSummary
 }
 
 // StageRecord captures one named stage outcome.
@@ -42,10 +56,12 @@ type InfrastructureItem struct {
 
 // SummaryReport is the rendered summary (terminal + markdown).
 type SummaryReport struct {
+	ExecutionResult     string
 	ExecutionOverview   string
 	Infrastructure      string
 	ValidationResults   string
 	PipelineStages      string
+	PipelineOutcome     string
 	KeyLearnings        string
 	Recommendations     string
 	SuccessfulStages    string
@@ -54,5 +70,22 @@ type SummaryReport struct {
 	InfrastructureState string
 	RecoverySteps       string
 	OverallStatus       string
-	RawMarkdown         string
+	// init
+	ProjectDetection string
+	GeneratedFiles   string
+	NextSteps        string
+	// tunnel
+	TunnelOverview string
+	TunnelMetrics  string
+	SessionOutcome string
+	// destroy-ci
+	CleanupOverview  string
+	ResourcesRemoved string
+	ClusterStatus    string
+	RegistryStatus   string
+	JenkinsStatus    string
+	EnvironmentState string
+	// markdown-only extras
+	DeveloperNotes string
+	RawMarkdown    string
 }

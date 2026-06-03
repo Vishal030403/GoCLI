@@ -1,35 +1,34 @@
 package summary
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-// PrintSummary renders the summary in the terminal using CLI styling.
+func terminalSections(layout templateLayout, success bool) []sectionID {
+	if success {
+		return layout.terminalSuccess
+	}
+	return layout.terminalFailure
+}
+
+// PrintSummary renders the executive terminal summary using command-specific templates.
 func PrintSummary(state ExecutionState, report SummaryReport) {
+	layout := layoutFor(state)
+	ids := terminalSections(layout, state.Success)
+
 	fmt.Println()
 	fmt.Println("\033[90m────────────────────────────────────────────────────────\033[0m")
 	fmt.Println("\033[1;36m🤖 AI Summary\033[0m")
 	fmt.Println("\033[90m────────────────────────────────────────────────────────\033[0m")
 	fmt.Println()
 
-	printSection("Execution Overview", report.ExecutionOverview)
-
-	if state.Success {
-		printSection("Infrastructure Created", report.Infrastructure)
-		printSection("Validation Results", report.ValidationResults)
-		printSection("Pipeline Stages", report.PipelineStages)
-		printSection("Key Learnings", report.KeyLearnings)
-		printSection("Recommendations", report.Recommendations)
-	} else {
-		printSection("Successful Stages", report.SuccessfulStages)
-		printSection("Failed Stage", report.FailedStage)
-		printSection("Skipped Stages", report.SkippedStages)
-		printSection("Infrastructure State", report.InfrastructureState)
-		printSection("Pipeline Stages", report.PipelineStages)
-		printSection("Key Learnings", report.KeyLearnings)
-		printSection("Recovery Steps", report.RecoverySteps)
-		printSection("Recommendations", report.Recommendations)
-		if report.OverallStatus != "" {
-			printSection("Overall Pipeline Status", report.OverallStatus)
+	for _, id := range ids {
+		body := sectionBody(id, report)
+		if id == secResult {
+			body = report.ExecutionResult
 		}
+		printSection(sectionTitle(id), body)
 	}
 
 	fmt.Println("\033[90m────────────────────────────────────────────────────────\033[0m")
@@ -37,19 +36,12 @@ func PrintSummary(state ExecutionState, report SummaryReport) {
 }
 
 func printSection(title, body string) {
-	body = trimBody(body)
+	body = stringsTrim(body)
 	if body == "" {
 		return
 	}
 	fmt.Printf("\033[1m%s\033[0m\n", title)
 	fmt.Printf("   %s\n\n", indentBody(body))
-}
-
-func trimBody(s string) string {
-	if s == "" {
-		return ""
-	}
-	return s
 }
 
 func indentBody(body string) string {

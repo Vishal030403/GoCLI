@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// StructuredPayload builds JSON-friendly context for Gemini (no raw logs).
+// StructuredPayload builds JSON for Gemini — structured state only, no logs.
 func StructuredPayload(state ExecutionState) map[string]interface{} {
 	stages := make([]map[string]string, 0, len(state.Stages))
 	for _, s := range state.Stages {
@@ -24,22 +24,46 @@ func StructuredPayload(state ExecutionState) map[string]interface{} {
 		})
 	}
 
-	duration := state.Duration.String()
-	if state.Duration == 0 && !state.EndTime.IsZero() {
-		duration = state.EndTime.Sub(state.StartTime).Round(time.Second).String()
+	warnCount := warningStageCount(state)
+	errCount := len(state.Errors)
+	for _, s := range state.Stages {
+		if s.Status == StageFailed {
+			errCount++
+		}
 	}
 
-	return map[string]interface{}{
-		"command":        commandShort(state.Command),
-		"success":        state.Success,
-		"duration":       duration,
-		"failed_stage":   state.FailedStage,
-		"stages":         stages,
-		"warnings":       state.Warnings,
-		"errors":         state.Errors,
-		"infrastructure": infra,
-		"metadata":       state.Metadata,
+	payload := map[string]interface{}{
+		"command":         commandShort(state.Command),
+		"success":         state.Success,
+		"duration":        formatDuration(state),
+		"failed_stage":    state.FailedStage,
+		"stages":          stages,
+		"warnings":        state.Warnings,
+		"warnings_count":  warnCount,
+		"errors":          state.Errors,
+		"errors_count":    errCount,
+		"infrastructure":  infra,
+		"metadata":        state.Metadata,
+		"rules": map[string]string{
+			"status_meaning": "SUCCESS means completed without error. Do not describe SUCCESS stages as warnings.",
+			"warnings_rule":  "If warnings_count is 0, do not mention warnings anywhere.",
+			"skipped_rule":   "Only list skipped stages present in stages with status SKIPPED.",
+		},
 	}
+
+	if state.Tunnel != nil {
+		payload["tunnel"] = map[string]interface{}{
+			"app_name":            state.Tunnel.AppName,
+			"namespace":           state.Tunnel.Namespace,
+			"local_port":          state.Tunnel.LocalPort,
+			"target_port":         state.Tunnel.TargetPort,
+			"duration":            state.Tunnel.Duration.String(),
+			"requests_forwarded":  state.Tunnel.RequestsForwarded,
+			"outcome":             state.Tunnel.Outcome,
+		}
+	}
+
+	return payload
 }
 
 func commandShort(cmd string) string {
@@ -48,26 +72,4 @@ func commandShort(cmd string) string {
 		return strings.TrimPrefix(cmd, "pipeline ")
 	}
 	return cmd
-}
-
-// SuccessfulStageNames returns stages that completed successfully.
-func SuccessfulStageNames(state ExecutionState) []string {
-	var out []string
-	for _, s := range state.Stages {
-		if s.Status == StageSuccess {
-			out = append(out, s.Name)
-		}
-	}
-	return out
-}
-
-// SkippedStageNames returns stages marked skipped.
-func SkippedStageNames(state ExecutionState) []string {
-	var out []string
-	for _, s := range state.Stages {
-		if s.Status == StageSkipped {
-			out = append(out, s.Name)
-		}
-	}
-	return out
 }

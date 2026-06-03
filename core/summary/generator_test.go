@@ -6,29 +6,42 @@ import (
 	"time"
 )
 
-func TestGenerateFallback_SuccessPrepCI(t *testing.T) {
+func TestGenerateFallback_NoFalseWarnings(t *testing.T) {
 	state := ExecutionState{
-		Command:   "pipeline prep-ci",
-		Success:   true,
-		StartTime: time.Now().Add(-2 * time.Minute),
-		EndTime:   time.Now(),
-		Duration:  2 * time.Minute,
+		Command: "pipeline prep-ci",
+		Success: true,
+		Stages: []StageRecord{
+			{Name: "Starting Registry", Status: StageSuccess},
+			{Name: "Bridging Registry and Kind Networks", Status: StageSuccess},
+			{Name: "Booting Jenkins Container", Status: StageSuccess},
+		},
+	}
+	report := sanitizeReport(state, generateFallback(state))
+	combined := report.ExecutionOverview + report.PipelineStages + report.ValidationResults
+	if strings.Contains(strings.ToLower(combined), "warning") {
+		t.Fatalf("expected no warning language when none occurred: %q", combined)
+	}
+}
+
+func TestSanitizeReport_StripsWarningsWhenZero(t *testing.T) {
+	state := ExecutionState{Command: "pipeline prep-ci", Success: true}
+	r := SummaryReport{ExecutionOverview: "Registry completed with warnings"}
+	out := sanitizeReport(state, r)
+	if strings.Contains(strings.ToLower(out.ExecutionOverview), "warning") {
+		t.Fatal("sanitize should strip invented warnings")
+	}
+}
+
+func TestFormatStagesConcise(t *testing.T) {
+	state := ExecutionState{
 		Stages: []StageRecord{
 			{Name: "Preflight", Status: StageSuccess},
 			{Name: "Registry", Status: StageSuccess},
-			{Name: "Jenkins", Status: StageSuccess},
-		},
-		Infrastructure: []InfrastructureItem{
-			{Name: "Registry", Detail: "127.0.0.1:5001"},
-			{Name: "Kind Cluster", Detail: "ephemeral-test"},
 		},
 	}
-	report := generateFallback(state)
-	if !strings.Contains(report.ExecutionOverview, "prep-ci") {
-		t.Fatalf("expected prep-ci in overview: %q", report.ExecutionOverview)
-	}
-	if report.KeyLearnings == "" {
-		t.Fatal("expected learnings")
+	s := formatStagesConcise(state)
+	if !strings.Contains(s, "✓") {
+		t.Fatalf("expected checkmarks: %q", s)
 	}
 }
 
@@ -38,5 +51,11 @@ func TestGenerateExecutionSummary_DoesNotPanic(t *testing.T) {
 			t.Fatalf("panicked: %v", r)
 		}
 	}()
-	GenerateExecutionSummary(ExecutionState{Command: "pipeline init", Success: true})
+	ResetSummaryGuard()
+	GenerateExecutionSummary(ExecutionState{
+		Command:   "pipeline init",
+		Success:   true,
+		StartTime: time.Now(),
+		EndTime:   time.Now(),
+	})
 }
